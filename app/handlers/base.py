@@ -120,42 +120,87 @@ async def cmd_help(message: types.Message):
 async def cmd_my_subscriptions(message: types.Message):
     """Handle /mysubscriptions command"""
     user_id = message.from_user.id
-    session_factory = message.bot.get("session_factory")
+    logger.info(f"[DEBUG] cmd_my_subscriptions for user {user_id}")
     
-    async with get_session(session_factory) as session:
-        # Get user's active subscriptions
-        subscriptions = await get_user_subscriptions(session, user_id)
+    try:
+        # Get the bot instance - check multiple ways
+        bot_instance = None
+        try:
+            # Try to get from message
+            bot_instance = message.bot
+            logger.info(f"[DEBUG] Got bot from message in mysubscriptions")
+        except Exception as e1:
+            try:
+                # Try to get current bot
+                from aiogram import Bot
+                bot_instance = Bot.get_current()
+                logger.info(f"[DEBUG] Got bot from current in mysubscriptions")
+            except Exception as e2:
+                # Use global bot as last resort
+                from webhook import bot as global_bot
+                bot_instance = global_bot
+                logger.info(f"[DEBUG] Using global bot in mysubscriptions")
         
-        if subscriptions:
-            subs_text = f"{hbold('Ваши активные подписки:')}\n\n"
-            for sub in subscriptions:
-                end_date = sub.end_date.strftime("%d.%m.%Y %H:%M")
-                subs_text += f"📌 {sub.channel.name}\n"
-                subs_text += f"📅 Активна до: {end_date}\n"
-                subs_text += f"💰 Тариф: {sub.tariff.name}\n\n"
+        # Try to get session factory from multiple places
+        session_factory = None
+        
+        # 1. Try from bot data
+        if hasattr(bot_instance, 'data') and bot_instance.data and 'session_factory' in bot_instance.data:
+            session_factory = bot_instance.data['session_factory']
+            logger.info(f"[DEBUG] Got session_factory from bot.data")
+        # 2. Try from dispatcher data
+        elif hasattr(message, 'conf') and hasattr(message.conf, 'dp') and hasattr(message.conf.dp, 'data'):
+            if 'session_factory' in message.conf.dp.data:
+                session_factory = message.conf.dp.data['session_factory']
+                logger.info(f"[DEBUG] Got session_factory from dp.data")
+        # 3. Try from global dispatcher as last resort
         else:
-            subs_text = "У вас нет активных подписок."
+            from webhook import dp as global_dp
+            if hasattr(global_dp, 'data') and 'session_factory' in global_dp.data:
+                session_factory = global_dp.data['session_factory']
+                logger.info(f"[DEBUG] Got session_factory from global dp")
+            else:
+                logger.error(f"[DEBUG] Could not find session_factory in any context!")
+                await message.answer("Извините, произошла ошибка при получении подписок. Попробуйте позже.")
+                return
         
-        # Create keyboard
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(
-            InlineKeyboardButton(
-                text="🔄 Обновить",
-                callback_data="refresh_subscriptions"
+        async with get_session(session_factory) as session:
+            # Get user's active subscriptions
+            subscriptions = await get_user_subscriptions(session, user_id)
+            
+            if subscriptions:
+                subs_text = f"{hbold('Ваши активные подписки:')}\n\n"
+                for sub in subscriptions:
+                    end_date = sub.end_date.strftime("%d.%m.%Y %H:%M")
+                    subs_text += f"📌 {sub.channel.name}\n"
+                    subs_text += f"📅 Активна до: {end_date}\n"
+                    subs_text += f"💰 Тариф: {sub.tariff.name}\n\n"
+            else:
+                subs_text = "У вас нет активных подписок."
+            
+            # Create keyboard
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(
+                InlineKeyboardButton(
+                    text="🔄 Обновить",
+                    callback_data="refresh_subscriptions"
+                )
             )
-        )
-        keyboard.add(
-            InlineKeyboardButton(
-                text="🔙 Вернуться в главное меню",
-                callback_data="back_to_start"
+            keyboard.add(
+                InlineKeyboardButton(
+                    text="🔙 Вернуться в главное меню",
+                    callback_data="back_to_start"
+                )
             )
-        )
-        
-        await message.answer(
-            subs_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+            
+            await message.answer(
+                subs_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in cmd_my_subscriptions: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении ваших подписок. Пожалуйста, попробуйте позже.")
 
 # Callback handler for back to start button
 async def callback_back_to_start(callback_query: types.CallbackQuery):
