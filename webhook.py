@@ -92,6 +92,7 @@ async def on_startup():
         logger.info("Registering handlers...")
         register_all_handlers(dp)
         logger.info("Handlers registered.")
+        logger.info(f"Dispatcher object ID after registration: {id(dp)}")
         
         # Настраиваем планировщик
         logger.info("Setting up scheduler...")
@@ -233,6 +234,16 @@ def ensure_dp_initialized():
         logger.info("Initialization task loop_task is still running...")
         return dp
 
+# --- Новая async-обертка для process_update ---
+async def process_update_wrapper(dp_instance, update_obj):
+    try:
+        # logger.info(f"Processing update {update_obj.update_id} inside wrapper...") # Отладочный лог
+        await dp_instance.process_update(update_obj)
+        # logger.info(f"Finished processing update {update_obj.update_id} inside wrapper.") # Отладочный лог
+    except Exception as e:
+        logger.error(f"!!! EXCEPTION INSIDE process_update_wrapper for update {update_obj.update_id}: {e}", exc_info=True)
+# ---------------------------------------------
+
 # Эндпоинт для вебхука
 @app.route('/webhook/' + os.getenv("BOT_TOKEN"), methods=['POST'])
 def webhook():
@@ -241,6 +252,8 @@ def webhook():
     if not dispatcher:
         logger.error("Dispatcher is None after ensure_dp_initialized, returning 500")
         return Response("Bot initialization error", status=500)
+    
+    logger.info(f"Using dispatcher object ID in webhook: {id(dispatcher)}")
     
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
@@ -254,7 +267,8 @@ def webhook():
             try:
                 # Используем глобальный loop из фонового потока (ВОЗВРАЩЕНО)
                 future = asyncio.run_coroutine_threadsafe(
-                    dispatcher.process_update(update),
+                    # Вызываем обертку вместо прямого вызова process_update
+                    process_update_wrapper(dispatcher, update),
                     loop # Используем глобальный loop
                 )
                 # Не ждем результата future.result()
