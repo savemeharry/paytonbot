@@ -4,5 +4,7 @@ sqlalchemy==2.0.12
 alembic==1.10.4
 python-dotenv==1.0.0
 APScheduler==3.10.1
-flask==2.3.3 
+flask==2.3.3
 gunicorn==20.1.0
+requests==2.32.3
+aiosqlite==0.19.0 

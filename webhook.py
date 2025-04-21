@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import os
 from dotenv import load_dotenv
+import requests
 
 from app.models.base import Base
 from app.handlers import register_all_handlers
@@ -61,9 +62,22 @@ async def on_startup():
     # Настраиваем планировщик
     setup_scheduler(bot, session_factory)
     
-    # Устанавливаем webhook (можно раскомментировать, если нужно устанавливать webhook прямо отсюда)
-    # WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    # await bot.set_webhook(WEBHOOK_URL)
+    # Автоматически настраиваем webhook для Render
+    try:
+        # Получаем URL приложения - сначала ищем Render URL, потом пробуем PythonAnywhere
+        app_url = os.environ.get('RENDER_EXTERNAL_URL', 'https://paytonbot.onrender.com')
+        bot_token = os.getenv("BOT_TOKEN")
+        webhook_url = f"{app_url}/webhook/{bot_token}"
+        
+        logger.info(f"Настраиваем webhook на {webhook_url}")
+        response = requests.get(f"https://api.telegram.org/bot{bot_token}/setWebhook?url={webhook_url}")
+        result = response.json()
+        if result.get("ok"):
+            logger.info(f"Webhook успешно установлен на {webhook_url}")
+        else:
+            logger.error(f"Ошибка при установке webhook: {result}")
+    except Exception as e:
+        logger.error(f"Ошибка при установке webhook: {e}")
     
     logger.info("Bot started with webhook!")
     
@@ -99,7 +113,8 @@ def webhook():
 def index():
     return 'Бот работает! Webhook активен.'
 
-# Для локальной отладки
- if __name__ == '__main__':
-       port = int(os.environ.get('PORT', 8080))
-       app.run(host='0.0.0.0', port=port)
+# Для запуска приложения
+if __name__ == '__main__':
+    # Получаем порт из переменной окружения для Render
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port) 

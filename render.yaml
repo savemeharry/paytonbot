@@ -1,9 +1,11 @@
 services:
-     - type: web
-       name: telegram-bot
-       runtime: python
-       buildCommand: pip install -r requirements.txt
-       startCommand: python webhook.py
-       envVars:
-         - key: PYTHONUNBUFFERED
-           value: true
+  - type: web
+    name: paytonbot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn 'webhook:app' --bind=0.0.0.0:$PORT
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "true"
+      - key: PAYMENT_PROVIDER_TOKEN
+        value: "stars" 

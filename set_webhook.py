@@ -16,15 +16,14 @@ load_dotenv()
 def set_webhook():
     """Устанавливает вебхук для Telegram бота"""
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    # Формируем URL на основе имени пользователя PythonAnywhere
-    username = os.getenv("PYTHONANYWHERE_USERNAME")
     
-    if not username:
-        logger.error("PYTHONANYWHERE_USERNAME не указан в .env файле")
-        print("Добавьте ваше имя пользователя PythonAnywhere в .env файл как PYTHONANYWHERE_USERNAME=ваше_имя")
-        sys.exit(1)
-    
-    WEBHOOK_URL = f"https://{username}.pythonanywhere.com/webhook/{BOT_TOKEN}"
+    # Определяем URL хостинга (Render или PythonAnywhere)
+    if os.environ.get('RENDER_EXTERNAL_URL'):
+        # Если запущено на Render
+        WEBHOOK_URL = f"{os.environ.get('RENDER_EXTERNAL_URL')}/webhook/{BOT_TOKEN}"
+    else:
+        # Пытаемся определить из переменной окружения или по умолчанию для Render
+        WEBHOOK_URL = f"https://paytonbot.onrender.com/webhook/{BOT_TOKEN}"
     
     # Устанавливаем вебхук
     logger.info(f"Устанавливаем webhook на {WEBHOOK_URL}")
