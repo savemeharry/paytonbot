@@ -32,16 +32,18 @@ async def cmd_start(message: types.Message):
             InlineKeyboardButton(text="ℹ️ Помощь", callback_data="help")
         )
         
-        # Log important message info and dispatcher data
-        logger.info(f"User ID: {message.from_user.id}, Username: {message.from_user.username}")
-        logger.info(f"Bot data keys: {list(message.bot.data.keys() if hasattr(message.bot, 'data') else [])}")
+        # Enhanced logging
+        logger.info(f"[DEBUG] Message object: chat_id={message.chat.id}, from_user={message.from_user.id}")
+        if hasattr(message.bot, 'data'):
+            logger.info(f"[DEBUG] Bot data keys: {list(message.bot.data.keys())}")
         
         # Send the welcome message
+        logger.info(f"[DEBUG] About to send message to user {message.from_user.id}")
         result = await message.answer(
             "Добро пожаловать! Я бот для управления подписками на каналы. Чем могу помочь?", 
             reply_markup=keyboard
         )
-        logger.info(f"Message sent successfully, message_id: {result.message_id}")
+        logger.info(f"[DEBUG] Message sent successfully, message_id: {result.message_id}")
         
     except Exception as e:
         error_msg = f"Error in cmd_start: {e}"
@@ -49,12 +51,20 @@ async def cmd_start(message: types.Message):
         
         # Try fallback direct message using the API
         try:
-            from webhook import send_direct_message
-            send_direct_message(
-                message.from_user.id, 
-                "Произошла ошибка при обработке команды. Попробуйте позже."
-            )
-            logger.info(f"Sent fallback message to {message.from_user.id}")
+            # Import at top level to avoid circular imports
+            import requests
+            import os
+            
+            bot_token = os.getenv("BOT_TOKEN")
+            send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            
+            payload = {
+                'chat_id': message.from_user.id,
+                'text': "Произошла ошибка при обработке команды. Попробуйте позже."
+            }
+            
+            response = requests.post(send_url, json=payload)
+            logger.info(f"[DEBUG] Fallback message response: {response.status_code} - {response.text}")
         except Exception as fallback_error:
             logger.error(f"Even fallback failed: {fallback_error}", exc_info=True)
 
