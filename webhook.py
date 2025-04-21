@@ -234,16 +234,6 @@ def ensure_dp_initialized():
         logger.info("Initialization task loop_task is still running...")
         return dp
 
-# --- Новая async-обертка для process_update ---
-async def process_update_wrapper(dp_instance, update_obj):
-    try:
-        # logger.info(f"Processing update {update_obj.update_id} inside wrapper...") # Отладочный лог
-        await dp_instance.process_update(update_obj)
-        # logger.info(f"Finished processing update {update_obj.update_id} inside wrapper.") # Отладочный лог
-    except Exception as e:
-        logger.error(f"!!! EXCEPTION INSIDE process_update_wrapper for update {update_obj.update_id}: {e}", exc_info=True)
-# ---------------------------------------------
-
 # Эндпоинт для вебхука
 @app.route('/webhook/' + os.getenv("BOT_TOKEN"), methods=['POST'])
 def webhook():
@@ -263,25 +253,51 @@ def webhook():
             json_data = json.loads(json_string)
             update = types.Update(**json_data)
             
+            # Log important update info for debugging
+            update_type = None
+            if update.message:
+                update_type = f"message from {update.message.from_user.id}"
+                if update.message.text:
+                    update_type += f" with text: {update.message.text}"
+            elif update.callback_query:
+                update_type = f"callback_query with data: {update.callback_query.data}"
+            
+            logger.info(f"Processing update {update.update_id} of type: {update_type}")
+            
             # Передаем ВСЕ обновления в диспетчер для асинхронной обработки
             try:
-                # Используем глобальный loop из фонового потока (ВОЗВРАЩЕНО)
+                # Используем глобальный loop из фонового потока
                 future = asyncio.run_coroutine_threadsafe(
-                    # Вызываем обертку вместо прямого вызова process_update
-                    process_update_wrapper(dispatcher, update),
-                    loop # Используем глобальный loop
+                    dispatcher.process_update(update),  # Process directly instead of using wrapper
+                    loop  # Используем глобальный loop
                 )
-                # Не ждем результата future.result()
+                
+                # Try to get result with a short timeout for better error reporting
+                try:
+                    future.result(0.1)  # Don't block too long in case of issues
+                    logger.info(f"Update {update.update_id} successfully processed")
+                except asyncio.TimeoutError:
+                    # This is expected, we don't need to wait for complete processing
+                    logger.info(f"Update {update.update_id} processing continues in background")
+                except Exception as e:
+                    logger.error(f"Error in update {update.update_id} processing: {e}", exc_info=True)
+                    
             except RuntimeError as e:
-                 if "cannot schedule new futures after shutdown" in str(e):
-                      logger.warning(f"Event loop seems to be shutting down. Could not process update {json_data.get('update_id')}.")
-                 # Убираем проверку no running event loop, т.к. loop должен быть
-                 else:
-                      logger.error(f"RuntimeError submitting update {json_data.get('update_id')} to dispatcher: {e}", exc_info=True)
+                if "cannot schedule new futures after shutdown" in str(e):
+                    logger.warning(f"Event loop seems to be shutting down. Could not process update {update.update_id}.")
+                else:
+                    logger.error(f"RuntimeError submitting update {update.update_id} to dispatcher: {e}", exc_info=True)
+                
+                # Fallback: Try direct message sending for commands
+                if update.message and update.message.text and update.message.text.startswith('/'):
+                    chat_id = update.message.chat.id
+                    send_direct_message(chat_id, "Извините, бот перезагружается. Попробуйте позже.")
+                    logger.info(f"Sent fallback message to {chat_id}")
+                    
             except Exception as e:
-                logger.error(f"Error submitting update {json_data.get('update_id')} to dispatcher: {e}", exc_info=True)
+                logger.error(f"Error submitting update {update.update_id} to dispatcher: {e}", exc_info=True)
             
-            return Response(status=200) # Отвечаем Telegram сразу
+            return Response(status=200)  # Отвечаем Telegram сразу
 
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка декодирования JSON: {e}", exc_info=True)
@@ -302,6 +318,39 @@ def index():
          return 'Ошибка инициализации бота. Проверьте логи.'
     else:
          return 'Бот инициализируется... Пожалуйста, подождите.'
+
+# Добавляем отладочный эндпоинт для прямой отправки сообщений
+@app.route('/send_test/<string:chat_id>')
+def send_test_message(chat_id):
+    try:
+        result = send_direct_message(chat_id, "Тестовое сообщение через прямой API вызов")
+        return f"Сообщение отправлено: {result}"
+    except Exception as e:
+        logger.error(f"Error in test endpoint: {e}", exc_info=True)
+        return f"Ошибка: {str(e)}"
+
+# Эндпоинт для проверки статуса бота
+@app.route('/status')
+def status():
+    try:
+        dp_status = "Инициализирован" if is_dp_initialized_successfully else "Не инициализирован"
+        loop_status = "Работает" if loop and loop.is_running() else "Не работает"
+        handlers_count = len(dp.message_handlers.handlers) if dp and hasattr(dp, 'message_handlers') else 0
+        
+        status_info = {
+            "bot_name": bot.username if hasattr(bot, 'username') else "Unknown",
+            "dp_initialized": is_dp_initialized_successfully,
+            "loop_running": loop and loop.is_running(),
+            "handlers_registered": handlers_count,
+            "dp_data_keys": list(dp.data.keys()) if dp and hasattr(dp, 'data') else [],
+            "webhook_url": f"{os.environ.get('RENDER_EXTERNAL_URL', 'Unknown')}/webhook/{os.getenv('BOT_TOKEN')}"
+        }
+        
+        import json
+        return Response(json.dumps(status_info, indent=2), mimetype='application/json')
+    except Exception as e:
+        logger.error(f"Error in status endpoint: {e}", exc_info=True)
+        return f"Error getting status: {str(e)}"
 
 # Функция для отправки сообщений напрямую через API (на случай сбоев)
 def send_direct_message(chat_id, text, parse_mode='HTML', reply_markup=None):
