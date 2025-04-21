@@ -8,4 +8,4 @@ services:
       - key: PYTHONUNBUFFERED
         value: "true"
       - key: PAYMENT_PROVIDER_TOKEN
-        value: "stars" 
+        sync: false  # Будет установлено в панели управления Render 

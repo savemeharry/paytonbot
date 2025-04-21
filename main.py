@@ -54,9 +54,6 @@ async def on_startup(dispatcher):
     # Register all handlers
     register_all_handlers(dispatcher)
     
-    # Set up scheduler for checking expired subscriptions
-    setup_scheduler(bot, session_factory)
-    
     # Notify admins about bot startup
     admin_ids = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()]
     for admin_id in admin_ids:
@@ -65,13 +62,25 @@ async def on_startup(dispatcher):
         except Exception as e:
             logger.error(f"Failed to notify admin {admin_id}: {e}")
     
+    # Set up scheduler for checking expired subscriptions
+    dispatcher["scheduler"] = setup_scheduler(bot, session_factory)
+    
     logger.info("Bot started!")
 
 async def on_shutdown(dispatcher):
     logger.info("Shutting down...")
+    
+    # Stop scheduler if running
+    if "scheduler" in dispatcher.data:
+        dispatcher.data["scheduler"].shutdown(wait=False)
+    
     # Close storage
     await dispatcher.storage.close()
     await dispatcher.storage.wait_closed()
+    
+    # Close bot session
+    await bot.session.close()
+    
     logger.info("Bot stopped!")
 
 if __name__ == "__main__":

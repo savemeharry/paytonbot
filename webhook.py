@@ -6,6 +6,7 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import os
 from dotenv import load_dotenv
 import requests
+import atexit
 
 from app.models.base import Base
 from app.handlers import register_all_handlers
@@ -28,8 +29,9 @@ bot = Bot(token=os.getenv("BOT_TOKEN"))
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# Глобальный диспетчер для доступа из webhook обработчика
-global_dp = None
+# Shared objects
+loop = asyncio.new_event_loop()
+scheduler = None
 
 # Настройка базы данных
 async def init_db():
@@ -46,26 +48,32 @@ async def init_db():
         engine, class_=AsyncSession, expire_on_commit=False
     )
     
-    return session_factory
+    return session_factory, engine
 
 # Настраиваем приложение
 async def on_startup():
-    session_factory = await init_db()
+    session_factory, engine = await init_db()
     
     # Устанавливаем сессию и токен платежей
     dp["session_factory"] = session_factory
     dp["payment_provider_token"] = os.getenv("PAYMENT_PROVIDER_TOKEN")
+    dp["engine"] = engine
     
     # Регистрируем обработчики
     register_all_handlers(dp)
     
     # Настраиваем планировщик
-    setup_scheduler(bot, session_factory)
+    global scheduler
+    scheduler = setup_scheduler(bot, session_factory)
     
     # Автоматически настраиваем webhook для Render
     try:
-        # Получаем URL приложения - сначала ищем Render URL, потом пробуем PythonAnywhere
-        app_url = os.environ.get('RENDER_EXTERNAL_URL', 'https://paytonbot.onrender.com')
+        # Получаем URL приложения из переменных окружения
+        app_url = os.environ.get('RENDER_EXTERNAL_URL')
+        if not app_url:
+            app_url = os.environ.get('APP_URL', 'https://paytonbot.onrender.com')
+            logger.warning(f"RENDER_EXTERNAL_URL not found, using fallback URL: {app_url}")
+        
         bot_token = os.getenv("BOT_TOKEN")
         webhook_url = f"{app_url}/webhook/{bot_token}"
         
@@ -81,40 +89,97 @@ async def on_startup():
     
     logger.info("Bot started with webhook!")
     
-    global global_dp
-    global_dp = dp
-    
     return dp
 
+# Cleanup function
+async def on_shutdown():
+    logger.info("Shutting down bot...")
+    
+    # Close storage
+    await dp.storage.close()
+    await dp.storage.wait_closed()
+    
+    # Close bot session
+    await bot.session.close()
+    
+    # Stop scheduler if running
+    if scheduler:
+        scheduler.shutdown(wait=False)
+    
+    # Close database connection
+    if "engine" in dp.data:
+        await dp.data["engine"].dispose()
+    
+    logger.info("Bot shutdown complete")
+
+# Register shutdown function
+def shutdown_event():
+    asyncio.run_coroutine_threadsafe(on_shutdown(), loop)
+    loop.call_soon_threadsafe(loop.stop)
+
+atexit.register(shutdown_event)
+
 # Инициализируем диспетчер в новом цикле событий
-loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-loop.run_until_complete(on_startup())
+loop_task = loop.create_task(on_startup())
+initialized_dp = None
+
+def ensure_dp_initialized():
+    """Make sure dispatcher is initialized before handling requests"""
+    global initialized_dp
+    if initialized_dp is None:
+        # Wait for initialization to complete
+        initialized_dp = loop.run_until_complete(loop_task)
+    return initialized_dp
 
 # Эндпоинт для вебхука
 @app.route('/webhook/' + os.getenv("BOT_TOKEN"), methods=['POST'])
 def webhook():
+    dp = ensure_dp_initialized()
+    
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = types.Update.to_object(json_string)
         
-        # Обработка обновления в новом потоке
-        asyncio.run_coroutine_threadsafe(
-            global_dp.process_update(update),
-            loop
-        )
-        
-        return Response(status=200)
+        try:
+            # Обработка обновления в новом потоке
+            future = asyncio.run_coroutine_threadsafe(
+                dp.process_update(update),
+                loop
+            )
+            # Wait for processing to complete with a timeout
+            future.result(timeout=60)
+            return Response(status=200)
+        except Exception as e:
+            # Log the error but still return 200 to Telegram
+            logger.error(f"Error processing update: {e}", exc_info=True)
+            return Response(status=200)
     else:
         return Response(status=403)
 
 # Эндпоинт для проверки работы приложения
 @app.route('/')
 def index():
+    # Ensure the bot is initialized
+    ensure_dp_initialized()
     return 'Бот работает! Webhook активен.'
+
+# Запуск фоновой задачи для event loop
+def run_event_loop():
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
 
 # Для запуска приложения
 if __name__ == '__main__':
+    # Start event loop in a separate thread
+    import threading
+    threading.Thread(target=run_event_loop, daemon=True).start()
+    
     # Получаем порт из переменной окружения для Render
     port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port) 
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True) 

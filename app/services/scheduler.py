@@ -98,4 +98,7 @@ def setup_scheduler(bot: Bot, session_factory):
     # Start scheduler
     scheduler.start()
     
-    logger.info(f"Scheduler started, checking subscriptions every {interval_seconds} seconds") 
+    logger.info(f"Scheduler started, checking subscriptions every {interval_seconds} seconds")
+    
+    # Return scheduler so it can be properly shutdown
+    return scheduler 

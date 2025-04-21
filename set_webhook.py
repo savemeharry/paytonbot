@@ -17,13 +17,23 @@ def set_webhook():
     """Устанавливает вебхук для Telegram бота"""
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     
-    # Определяем URL хостинга (Render или PythonAnywhere)
-    if os.environ.get('RENDER_EXTERNAL_URL'):
-        # Если запущено на Render
-        WEBHOOK_URL = f"{os.environ.get('RENDER_EXTERNAL_URL')}/webhook/{BOT_TOKEN}"
-    else:
-        # Пытаемся определить из переменной окружения или по умолчанию для Render
-        WEBHOOK_URL = f"https://paytonbot.onrender.com/webhook/{BOT_TOKEN}"
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN не найден. Убедитесь, что файл .env содержит BOT_TOKEN.")
+        sys.exit(1)
+    
+    # Определяем URL хостинга 
+    app_url = os.environ.get('RENDER_EXTERNAL_URL')
+    if not app_url:
+        app_url = os.environ.get('APP_URL')
+        if not app_url:
+            logger.error("URL приложения не найден в переменных окружения. Пожалуйста, укажите RENDER_EXTERNAL_URL или APP_URL.")
+            user_input = input("https://paytonbot.onrender.com")
+            if not user_input:
+                logger.error("URL не введен. Выход.")
+                sys.exit(1)
+            app_url = user_input.strip()
+    
+    WEBHOOK_URL = f"{app_url}/webhook/{BOT_TOKEN}"
     
     # Устанавливаем вебхук
     logger.info(f"Устанавливаем webhook на {WEBHOOK_URL}")
@@ -42,6 +52,10 @@ def get_webhook_info():
     """Получает информацию о текущем вебхуке"""
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN не найден. Убедитесь, что файл .env содержит BOT_TOKEN.")
+        sys.exit(1)
+    
     logger.info("Получаем информацию о webhook")
     response = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo")
     result = response.json()
@@ -52,6 +66,7 @@ def get_webhook_info():
         logger.info(f"URL: {webhook_info.get('url')}")
         logger.info(f"Ожидает обновлений: {webhook_info.get('pending_update_count')}")
         logger.info(f"Последняя ошибка: {webhook_info.get('last_error_message', 'Нет ошибок')}")
+        logger.info(f"Максимальные соединения: {webhook_info.get('max_connections', 40)}")
     else:
         logger.error(f"Ошибка при получении информации о webhook: {result}")
     
@@ -60,6 +75,10 @@ def get_webhook_info():
 def delete_webhook():
     """Удаляет вебхук"""
     BOT_TOKEN = os.getenv("BOT_TOKEN")
+    
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN не найден. Убедитесь, что файл .env содержит BOT_TOKEN.")
+        sys.exit(1)
     
     logger.info("Удаляем webhook")
     response = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook")

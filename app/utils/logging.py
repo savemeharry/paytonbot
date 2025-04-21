@@ -1,5 +1,7 @@
 import os
+import sys
 import logging
+import platform
 from logging.handlers import RotatingFileHandler
 
 def setup_logging():
@@ -25,4 +27,12 @@ def setup_logging():
     
     # Set lower log level for some verbose libraries
     logging.getLogger("aiogram").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING) 
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    
+    # Log system info
+    logger = logging.getLogger(__name__)
+    logger.info(f"Python version: {platform.python_version()}")
+    logger.info(f"Platform: {platform.platform()}")
+    logger.info(f"Working directory: {os.getcwd()}")
+    logger.info(f"Python path: {sys.executable}")
+    logger.info(f"Environment: {'RENDER' if os.environ.get('RENDER') else 'LOCAL'}") 
