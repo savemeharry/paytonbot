@@ -273,6 +273,10 @@ def webhook():
             
             logger.info(f"[DEBUG] Processing update {update.update_id} of type: {update_type}, chat_id: {chat_id}")
             
+            # Store references to the necessary objects for the thread
+            dispatcher_ref = dispatcher
+            bot_ref = bot
+            
             # Use a background task to process the update
             def process_update_task():
                 try:
@@ -280,8 +284,16 @@ def webhook():
                     task_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(task_loop)
                     
+                    # Set the bot as current in this thread context - THIS IS THE CRITICAL FIX
+                    bot_ref.set_current(bot_ref)
+                    
+                    # Make sure dispatcher has the bot reference
+                    if hasattr(dispatcher_ref, '_bot'):
+                        # Override the bot reference to ensure it's correct
+                        dispatcher_ref._bot = bot_ref
+                    
                     # Process the update in this dedicated event loop
-                    task_loop.run_until_complete(dispatcher.process_update(update))
+                    task_loop.run_until_complete(dispatcher_ref.process_update(update))
                     logger.info(f"[DEBUG] Update {update.update_id} processed successfully in dedicated task")
                     
                     # Close the event loop when done
