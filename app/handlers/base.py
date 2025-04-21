@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Start command handler
 async def cmd_start(message: types.Message):
     """Handle /start command"""
-    logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
+    logger.info(f"ENTERING cmd_start for user {message.from_user.id}")
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -23,12 +23,19 @@ async def cmd_start(message: types.Message):
     
     # Get session factory from dispatcher's data
     session_factory = message.bot.get("session_factory")
-    logger.info(f"Получен session_factory: {session_factory}")
+    logger.info(f"User {user_id}: Got session_factory: {session_factory}")
     
+    if not session_factory:
+        logger.error(f"User {user_id}: session_factory not found in bot context!")
+        await message.answer("Произошла внутренняя ошибка конфигурации. Пожалуйста, попробуйте позже.")
+        return
+
     try:
+        logger.info(f"User {user_id}: Attempting to get DB session...")
         async with get_session(session_factory) as session:
+            logger.info(f"User {user_id}: DB session obtained: {session}")
             # Get or create user
-            logger.info(f"Создаем или получаем пользователя {user_id}")
+            logger.info(f"User {user_id}: Getting or creating user...")
             user = await get_or_create_user(
                 session, 
                 user_id, 
@@ -36,16 +43,19 @@ async def cmd_start(message: types.Message):
                 first_name, 
                 last_name
             )
+            logger.info(f"User {user_id}: User object: {user}")
             
             # Get active channels
-            logger.info("Получаем активные каналы")
+            logger.info(f"User {user_id}: Getting active channels...")
             channels = await get_active_channels(session)
+            logger.info(f"User {user_id}: Active channels: {channels}")
             
             # Get user's active subscriptions
-            logger.info(f"Получаем подписки пользователя {user_id}")
+            logger.info(f"User {user_id}: Getting user subscriptions...")
             subscriptions = await get_user_subscriptions(session, user_id)
+            logger.info(f"User {user_id}: User subscriptions: {subscriptions}")
             
-            logger.info(f"Формируем сообщение для пользователя {user_id}")
+            logger.info(f"User {user_id}: Formatting message...")
             # Generate welcome message based on subscription status
             welcome_text = f"👋 {hbold('Добро пожаловать')}, {user.first_name or 'пользователь'}!\n\n"
             
@@ -80,16 +90,21 @@ async def cmd_start(message: types.Message):
             )
             
             # Send welcome message with keyboard
-            logger.info(f"Отправляем сообщение пользователю {user_id}")
+            logger.info(f"User {user_id}: Sending message...")
             await message.answer(
                 welcome_text,
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
-            logger.info(f"Успешно отправлено сообщение пользователю {user_id}")
+            logger.info(f"User {user_id}: Message sent successfully.")
     except Exception as e:
-        logger.error(f"Ошибка при обработке команды /start: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.")
+        logger.error(f"User {user_id}: Error in cmd_start: {e}", exc_info=True)
+        try:
+            await message.answer("Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.")
+        except Exception as send_error:
+             logger.error(f"User {user_id}: Failed to send error message: {send_error}", exc_info=True)
+    finally:
+        logger.info(f"EXITING cmd_start for user {user_id}")
 
 # Help command handler
 async def cmd_help(message: types.Message):
