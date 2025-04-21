@@ -292,6 +292,17 @@ def webhook():
                         # Override the bot reference to ensure it's correct
                         dispatcher_ref._bot = bot_ref
                     
+                    # Ensure bot data is available in the context
+                    if not hasattr(bot_ref, 'data') or not bot_ref.data:
+                        logger.info(f"[DEBUG] Copying data to bot in thread: {list(dp.data.keys() if dp.data else [])}")
+                        # Copy the data from the main dp to the bot in this thread
+                        if not hasattr(bot_ref, 'data'):
+                            bot_ref.data = {}
+                        # Copy essential data items
+                        for key in ['session_factory', 'payment_provider_token', 'engine']:
+                            if key in dp.data:
+                                bot_ref.data[key] = dp.data[key]
+                    
                     # Process the update in this dedicated event loop
                     task_loop.run_until_complete(dispatcher_ref.process_update(update))
                     logger.info(f"[DEBUG] Update {update.update_id} processed successfully in dedicated task")
