@@ -219,13 +219,67 @@ def webhook():
                         logger.info(f"Прямой ответ отправлен: {response.json()}")
                     except Exception as e:
                         logger.error(f"Ошибка при отправке прямого ответа: {e}", exc_info=True)
+                
+                # Для команды /help тоже делаем прямую отправку
+                elif text == '/help':
+                    logger.info("Обнаружена команда /help. Отправляем прямой ответ.")
+                    try:
+                        bot_token = os.getenv("BOT_TOKEN")
+                        help_text = (
+                            "<b>Как пользоваться ботом:</b>\n\n"
+                            "1️⃣ Выберите канал, на который хотите подписаться\n"
+                            "2️⃣ Выберите тариф подписки (неделя, месяц и т.д.)\n"
+                            "3️⃣ Оплатите подписку через Telegram Stars\n"
+                            "4️⃣ После оплаты вы получите приглашение в приватный канал\n\n"
+                            "<b>Команды бота:</b>\n"
+                            "/start - Главное меню\n"
+                            "/help - Эта справка\n"
+                            "/mysubscriptions - Ваши активные подписки"
+                        )
+                        
+                        # Прямой вызов API Telegram для отправки сообщения
+                        send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                        payload = {
+                            'chat_id': user_id,
+                            'text': help_text,
+                            'parse_mode': 'HTML'
+                        }
+                        response = requests.post(send_url, json=payload)
+                        logger.info(f"Прямой ответ на /help отправлен: {response.json()}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке прямого ответа на /help: {e}", exc_info=True)
+                
+                # Отправляем эхо-ответ на любое другое сообщение
+                else:
+                    logger.info(f"Получено обычное сообщение. Отправляем эхо-ответ.")
+                    try:
+                        bot_token = os.getenv("BOT_TOKEN")
+                        echo_text = f"Вы отправили: {text}\n\nДоступные команды:\n/start - Начать\n/help - Помощь"
+                        
+                        # Прямой вызов API Telegram для отправки сообщения
+                        send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                        payload = {
+                            'chat_id': user_id,
+                            'text': echo_text
+                        }
+                        response = requests.post(send_url, json=payload)
+                        logger.info(f"Эхо-ответ отправлен: {response.json()}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке эхо-ответа: {e}", exc_info=True)
             
             update = types.Update(**json_data)
+            
+            # Проверяем статус event loop
+            logger.info(f"Статус event loop: работает={not loop.is_closed()}, "
+                       f"количество задач={len(asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else [])}")
             
             # Создаем задачу для обработки обновления
             async def process_webhook_update(update_obj, dispatcher):
                 try:
                     logger.info(f"[ASYNC] Начинаем обработку обновления ID: {update_obj.update_id}")
+                    # Дополнительно логируем, что функция запустилась
+                    print(f"[PRINT] Асинхронная обработка запущена для update_id={update_obj.update_id}")
+                    
                     logger.info(f"[ASYNC] Диспетчер: {dispatcher}, доступные данные: {list(dispatcher.data.keys() if hasattr(dispatcher, 'data') else [])}")
                     
                     # Явно проверим наличие обработчиков
@@ -241,10 +295,23 @@ def webhook():
                     logger.error(f"[ASYNC] Ошибка при обработке обновления: {e}", exc_info=True)
             
             # Запускаем асинхронную обработку в фоне
-            future = asyncio.run_coroutine_threadsafe(
-                process_webhook_update(update, dispatcher), 
-                loop
-            )
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    process_webhook_update(update, dispatcher), 
+                    loop
+                )
+                # Добавляем callback для отслеживания завершения
+                def done_callback(fut):
+                    try:
+                        result = fut.result()
+                        logger.info(f"Асинхронная задача завершена успешно")
+                    except Exception as e:
+                        logger.error(f"Ошибка в асинхронной задаче: {e}")
+                
+                future.add_done_callback(done_callback)
+                logger.info(f"Асинхронная задача запущена: {future}")
+            except Exception as e:
+                logger.error(f"Ошибка при запуске асинхронной задачи: {e}", exc_info=True)
             
             # Не ждем результат
             return Response(status=200)
