@@ -26,10 +26,37 @@ logger = logging.getLogger(__name__)
 async def cmd_start(message: types.Message):
     logger.info(f"SIMPLE cmd_start called for user {message.from_user.id}")
     try:
-        await message.answer("Бот получил команду /start! (Тест)")
-        logger.info(f"Test message sent successfully to user {message.from_user.id}")
+        # Create keyboard with a simple button
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(
+            InlineKeyboardButton(text="ℹ️ Помощь", callback_data="help")
+        )
+        
+        # Log important message info and dispatcher data
+        logger.info(f"User ID: {message.from_user.id}, Username: {message.from_user.username}")
+        logger.info(f"Bot data keys: {list(message.bot.data.keys() if hasattr(message.bot, 'data') else [])}")
+        
+        # Send the welcome message
+        result = await message.answer(
+            "Добро пожаловать! Я бот для управления подписками на каналы. Чем могу помочь?", 
+            reply_markup=keyboard
+        )
+        logger.info(f"Message sent successfully, message_id: {result.message_id}")
+        
     except Exception as e:
-        logger.error(f"Error sending test message: {e}", exc_info=True)
+        error_msg = f"Error in cmd_start: {e}"
+        logger.error(error_msg, exc_info=True)
+        
+        # Try fallback direct message using the API
+        try:
+            from webhook import send_direct_message
+            send_direct_message(
+                message.from_user.id, 
+                "Произошла ошибка при обработке команды. Попробуйте позже."
+            )
+            logger.info(f"Sent fallback message to {message.from_user.id}")
+        except Exception as fallback_error:
+            logger.error(f"Even fallback failed: {fallback_error}", exc_info=True)
 
 # Help command handler
 async def cmd_help(message: types.Message):
