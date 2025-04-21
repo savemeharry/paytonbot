@@ -154,45 +154,60 @@ init_attempts = 0
 
 def ensure_dp_initialized():
     """Make sure dispatcher is initialized before handling requests"""
-    global initialized_dp, loop_task, init_attempts
+    global initialized_dp, loop_task
     
-    if initialized_dp is None:
-        # Увеличиваем счетчик попыток
-        init_attempts += 1
-        logger.info(f"Попытка инициализации диспетчера #{init_attempts}")
-        
-        if init_attempts > 3:
-            # Если много попыток, возвращаем глобальный диспетчер без ожидания
-            logger.warning("Превышено количество попыток инициализации, используем глобальный диспетчер")
-            return dp
-            
-        # Проверка, завершена ли задача
-        if loop_task.done():
-            # Если задача завершена с ошибкой, логируем и пробуем перезапустить
-            if loop_task.exception():
-                logger.error(f"Ошибка при инициализации бота: {loop_task.exception()}")
-                # Перезапускаем задачу инициализации
-                loop_task = loop.create_task(on_startup())
+    if initialized_dp:
+        return initialized_dp
+
+    logger.info("Проверяем инициализацию диспетчера...")
+
+    if loop_task.done():
+        logger.info("Задача инициализации loop_task завершена.")
+        try:
+            # Проверяем, не было ли ошибки в самой задаче
+            exception = loop_task.exception()
+            if exception:
+                logger.error(f"Ошибка в задаче инициализации on_startup: {exception}", exc_info=exception)
+                logger.warning("Используем глобальный dp из-за ошибки инициализации.")
+                initialized_dp = dp # Можно считать инициализацию проваленной
                 return dp
-                
-            # Если задача завершена успешно, получаем результат
-            initialized_dp = loop_task.result()
-            logger.info(f"Диспетчер инициализирован: {initialized_dp}")
-            return initialized_dp
-        else:
-            # Пробуем дождаться инициализации диспетчера
-            logger.info("Ожидаем инициализации диспетчера...")
-            try:
-                # Блокирующее ожидание с таймаутом
-                initialized_dp = asyncio.run_coroutine_threadsafe(
-                    asyncio.shield(on_startup()), loop
-                ).result(timeout=5)
-                logger.info(f"Диспетчер успешно инициализирован: {initialized_dp}")
+            else:
+                # Ошибки не было, получаем результат
+                initialized_dp = loop_task.result()
+                logger.info(f"Диспетчер успешно инициализирован (задача была завершена): {initialized_dp}")
                 return initialized_dp
-            except Exception as e:
-                logger.error(f"Ошибка при ожидании инициализации: {e}")
-                return dp
-    return initialized_dp
+        except asyncio.InvalidStateError:
+            logger.warning("Не удалось получить результат loop_task, хотя она помечена как done. Используем глобальный dp.")
+            initialized_dp = dp
+            return dp
+        except Exception as e:
+             logger.error(f"Неожиданная ошибка при проверке завершенной loop_task: {e}", exc_info=True)
+             initialized_dp = dp
+             return dp
+    else:
+        logger.info("Задача инициализации loop_task еще не завершена. Ожидаем...")
+        # Создаем корутину, которая просто ждет исходную задачу
+        async def _wait_for_task(task):
+            return await task
+
+        future = asyncio.run_coroutine_threadsafe(_wait_for_task(loop_task), loop)
+        try:
+            # Ждем завершения исходной задачи с таймаутом
+            initialized_dp = future.result(timeout=10) 
+            logger.info(f"Диспетчер успешно инициализирован через ожидание: {initialized_dp}")
+            return initialized_dp
+        except TimeoutError:
+             logger.warning("Таймаут (10с) ожидания инициализации диспетчера. Используем глобальный dp.")
+             # Не устанавливаем initialized_dp, чтобы пробовать снова при след. запросе
+             return dp # Возвращаем пока глобальный
+        except Exception as e:
+             logger.error(f"Ошибка при ожидании инициализации через run_coroutine_threadsafe: {e}", exc_info=True)
+             # Проверим, не завершилась ли сама задача с ошибкой за это время
+             if loop_task.done() and loop_task.exception():
+                 logger.error(f"Исходная задача инициализации loop_task завершилась с ошибкой: {loop_task.exception()}", exc_info=loop_task.exception())
+             logger.warning("Используем глобальный dp из-за ошибки ожидания.")
+             # Не устанавливаем initialized_dp
+             return dp # Возвращаем пока глобальный
 
 # Функция для синхронного вызова корутины
 def run_sync(coroutine):
