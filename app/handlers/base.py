@@ -13,98 +13,23 @@ from app.services.subscription import get_user_subscriptions
 logger = logging.getLogger(__name__)
 
 # Start command handler
-async def cmd_start(message: types.Message):
-    """Handle /start command"""
-    logger.info(f"ENTERING cmd_start for user {message.from_user.id}")
-    user_id = message.from_user.id
-    username = message.from_user.username
-    first_name = message.from_user.first_name
-    last_name = message.from_user.last_name
-    
-    # Get session factory from dispatcher's data
-    session_factory = message.bot.get("session_factory")
-    logger.info(f"User {user_id}: Got session_factory: {session_factory}")
-    
-    if not session_factory:
-        logger.error(f"User {user_id}: session_factory not found in bot context!")
-        await message.answer("Произошла внутренняя ошибка конфигурации. Пожалуйста, попробуйте позже.")
-        return
+# async def cmd_start(message: types.Message): (КОММЕНТИРУЕМ СТАРЫЙ)
+#     """Handle /start command"""
+#     logger.info(f"ENTERING cmd_start for user {message.from_user.id}") 
+#     user_id = message.from_user.id
+#     username = message.from_user.username
+# ... (весь остальной код старого cmd_start закомментирован) ...
+#     finally:
+#         logger.info(f"EXITING cmd_start for user {user_id}")
 
+# ПРОСТОЙ ТЕСТОВЫЙ ОБРАБОТЧИК
+async def cmd_start(message: types.Message):
+    logger.info(f"SIMPLE cmd_start called for user {message.from_user.id}")
     try:
-        logger.info(f"User {user_id}: Attempting to get DB session...")
-        async with get_session(session_factory) as session:
-            logger.info(f"User {user_id}: DB session obtained: {session}")
-            # Get or create user
-            logger.info(f"User {user_id}: Getting or creating user...")
-            user = await get_or_create_user(
-                session, 
-                user_id, 
-                username, 
-                first_name, 
-                last_name
-            )
-            logger.info(f"User {user_id}: User object: {user}")
-            
-            # Get active channels
-            logger.info(f"User {user_id}: Getting active channels...")
-            channels = await get_active_channels(session)
-            logger.info(f"User {user_id}: Active channels: {channels}")
-            
-            # Get user's active subscriptions
-            logger.info(f"User {user_id}: Getting user subscriptions...")
-            subscriptions = await get_user_subscriptions(session, user_id)
-            logger.info(f"User {user_id}: User subscriptions: {subscriptions}")
-            
-            logger.info(f"User {user_id}: Formatting message...")
-            # Generate welcome message based on subscription status
-            welcome_text = f"👋 {hbold('Добро пожаловать')}, {user.first_name or 'пользователь'}!\n\n"
-            
-            if subscriptions:
-                welcome_text += f"{hbold('Ваши активные подписки:')}\n"
-                for sub in subscriptions:
-                    welcome_text += f"📌 {sub.channel.name} - до {sub.end_date.strftime('%d.%m.%Y %H:%M')}\n"
-                welcome_text += "\nВы можете продлить текущие подписки или оформить новые:"
-            else:
-                welcome_text += "У вас пока нет активных подписок. Выберите канал для подписки:"
-            
-            # Create inline keyboard with channels
-            keyboard = InlineKeyboardMarkup(row_width=1)
-            
-            if channels:
-                for channel in channels:
-                    keyboard.add(
-                        InlineKeyboardButton(
-                            text=f"📺 {channel.name}", 
-                            callback_data=f"channel:{channel.id}"
-                        )
-                    )
-            else:
-                welcome_text += "\n\n❌ В данный момент нет доступных каналов для подписки."
-            
-            # Add help button
-            keyboard.add(
-                InlineKeyboardButton(
-                    text="ℹ️ Помощь",
-                    callback_data="help"
-                )
-            )
-            
-            # Send welcome message with keyboard
-            logger.info(f"User {user_id}: Sending message...")
-            await message.answer(
-                welcome_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-            logger.info(f"User {user_id}: Message sent successfully.")
+        await message.answer("Бот получил команду /start! (Тест)")
+        logger.info(f"Test message sent successfully to user {message.from_user.id}")
     except Exception as e:
-        logger.error(f"User {user_id}: Error in cmd_start: {e}", exc_info=True)
-        try:
-            await message.answer("Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.")
-        except Exception as send_error:
-             logger.error(f"User {user_id}: Failed to send error message: {send_error}", exc_info=True)
-    finally:
-        logger.info(f"EXITING cmd_start for user {user_id}")
+        logger.error(f"Error sending test message: {e}", exc_info=True)
 
 # Help command handler
 async def cmd_help(message: types.Message):
@@ -197,9 +122,16 @@ async def callback_help(callback_query: types.CallbackQuery):
 # Register base handlers
 def register_base_handlers(dp: Dispatcher):
     """Register all base handlers"""
+    logger.info("Registering base handlers...")
     dp.register_message_handler(cmd_start, CommandStart())
+    logger.info(f"Registered cmd_start for CommandStart filter.")
     dp.register_message_handler(cmd_help, Command("help"))
+    logger.info(f"Registered cmd_help for Command('help') filter.")
     dp.register_message_handler(cmd_my_subscriptions, Command("mysubscriptions"))
+    logger.info(f"Registered cmd_my_subscriptions for Command('mysubscriptions') filter.")
     
     dp.register_callback_query_handler(callback_back_to_start, lambda c: c.data == "back_to_start")
+    logger.info(f"Registered callback_back_to_start.")
     dp.register_callback_query_handler(callback_help, lambda c: c.data == "help") 
+    logger.info(f"Registered callback_help.")
+    logger.info("Base handlers registration finished.") 
