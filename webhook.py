@@ -126,6 +126,16 @@ def shutdown_event():
 
 atexit.register(shutdown_event)
 
+# Запуск фоновой задачи для event loop
+def run_event_loop():
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+
 # Инициализируем диспетчер в новом цикле событий
 asyncio.set_event_loop(loop)
 loop_task = loop.create_task(on_startup())
@@ -203,16 +213,6 @@ def index():
     except Exception as e:
         logger.error(f"Ошибка при инициализации бота: {e}", exc_info=True)
         return 'Бот пытается запуститься. Проверьте логи.'
-
-# Запуск фоновой задачи для event loop
-def run_event_loop():
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
 
 # Для запуска приложения
 if __name__ == '__main__':
