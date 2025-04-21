@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # Start command handler
 async def cmd_start(message: types.Message):
     """Handle /start command"""
+    logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -22,62 +23,73 @@ async def cmd_start(message: types.Message):
     
     # Get session factory from dispatcher's data
     session_factory = message.bot.get("session_factory")
+    logger.info(f"Получен session_factory: {session_factory}")
     
-    async with get_session(session_factory) as session:
-        # Get or create user
-        user = await get_or_create_user(
-            session, 
-            user_id, 
-            username, 
-            first_name, 
-            last_name
-        )
-        
-        # Get active channels
-        channels = await get_active_channels(session)
-        
-        # Get user's active subscriptions
-        subscriptions = await get_user_subscriptions(session, user_id)
-        
-        # Generate welcome message based on subscription status
-        welcome_text = f"👋 {hbold('Добро пожаловать')}, {user.first_name or 'пользователь'}!\n\n"
-        
-        if subscriptions:
-            welcome_text += f"{hbold('Ваши активные подписки:')}\n"
-            for sub in subscriptions:
-                welcome_text += f"📌 {sub.channel.name} - до {sub.end_date.strftime('%d.%m.%Y %H:%M')}\n"
-            welcome_text += "\nВы можете продлить текущие подписки или оформить новые:"
-        else:
-            welcome_text += "У вас пока нет активных подписок. Выберите канал для подписки:"
-        
-        # Create inline keyboard with channels
-        keyboard = InlineKeyboardMarkup(row_width=1)
-        
-        if channels:
-            for channel in channels:
-                keyboard.add(
-                    InlineKeyboardButton(
-                        text=f"📺 {channel.name}", 
-                        callback_data=f"channel:{channel.id}"
-                    )
-                )
-        else:
-            welcome_text += "\n\n❌ В данный момент нет доступных каналов для подписки."
-        
-        # Add help button
-        keyboard.add(
-            InlineKeyboardButton(
-                text="ℹ️ Помощь",
-                callback_data="help"
+    try:
+        async with get_session(session_factory) as session:
+            # Get or create user
+            logger.info(f"Создаем или получаем пользователя {user_id}")
+            user = await get_or_create_user(
+                session, 
+                user_id, 
+                username, 
+                first_name, 
+                last_name
             )
-        )
-        
-        # Send welcome message with keyboard
-        await message.answer(
-            welcome_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+            
+            # Get active channels
+            logger.info("Получаем активные каналы")
+            channels = await get_active_channels(session)
+            
+            # Get user's active subscriptions
+            logger.info(f"Получаем подписки пользователя {user_id}")
+            subscriptions = await get_user_subscriptions(session, user_id)
+            
+            logger.info(f"Формируем сообщение для пользователя {user_id}")
+            # Generate welcome message based on subscription status
+            welcome_text = f"👋 {hbold('Добро пожаловать')}, {user.first_name or 'пользователь'}!\n\n"
+            
+            if subscriptions:
+                welcome_text += f"{hbold('Ваши активные подписки:')}\n"
+                for sub in subscriptions:
+                    welcome_text += f"📌 {sub.channel.name} - до {sub.end_date.strftime('%d.%m.%Y %H:%M')}\n"
+                welcome_text += "\nВы можете продлить текущие подписки или оформить новые:"
+            else:
+                welcome_text += "У вас пока нет активных подписок. Выберите канал для подписки:"
+            
+            # Create inline keyboard with channels
+            keyboard = InlineKeyboardMarkup(row_width=1)
+            
+            if channels:
+                for channel in channels:
+                    keyboard.add(
+                        InlineKeyboardButton(
+                            text=f"📺 {channel.name}", 
+                            callback_data=f"channel:{channel.id}"
+                        )
+                    )
+            else:
+                welcome_text += "\n\n❌ В данный момент нет доступных каналов для подписки."
+            
+            # Add help button
+            keyboard.add(
+                InlineKeyboardButton(
+                    text="ℹ️ Помощь",
+                    callback_data="help"
+                )
+            )
+            
+            # Send welcome message with keyboard
+            logger.info(f"Отправляем сообщение пользователю {user_id}")
+            await message.answer(
+                welcome_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+            logger.info(f"Успешно отправлено сообщение пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке команды /start: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.")
 
 # Help command handler
 async def cmd_help(message: types.Message):
