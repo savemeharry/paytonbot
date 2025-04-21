@@ -36,66 +36,100 @@ scheduler = None
 
 # Настройка базы данных
 async def init_db():
+    logger.info("ENTERING init_db")
     # Получаем URL базы данных и убеждаемся, что драйвер асинхронный
     db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db")
+    logger.info(f"Using database URL (type: {type(db_url)}): {db_url[:db_url.find(':')] + '://...elided.../' + db_url.split('/')[-1] if db_url else 'None'}")
     # Заменяем обычный SQLite на асинхронный SQLite, если нужно
-    if db_url.startswith("sqlite:///"):
+    if db_url and db_url.startswith("sqlite:///"):
         db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+        logger.info(f"Adjusted SQLite URL: {db_url}")
     
+    if not db_url:
+         logger.error("DATABASE_URL is not set!")
+         raise ValueError("DATABASE_URL environment variable is not set.")
+
+    logger.info("Creating async engine...")
     engine = create_async_engine(
         db_url, 
-        echo=False
+        echo=False, 
+        pool_timeout=30
     )
+    logger.info("Async engine created.")
     
+    logger.info("Connecting to database and creating tables (if needed)...")
     async with engine.begin() as conn:
+        logger.info("Connection established. Running create_all...")
         # Create tables if they don't exist
         await conn.run_sync(Base.metadata.create_all)
+        logger.info("create_all finished.")
     
+    logger.info("Creating session factory...")
     session_factory = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
+    logger.info("Session factory created.")
     
+    logger.info("EXITING init_db")
     return session_factory, engine
 
 # Настраиваем приложение
 async def on_startup():
-    session_factory, engine = await init_db()
-    
-    # Устанавливаем сессию и токен платежей
-    dp["session_factory"] = session_factory
-    dp["payment_provider_token"] = os.getenv("PAYMENT_PROVIDER_TOKEN")
-    dp["engine"] = engine
-    
-    # Регистрируем обработчики
-    register_all_handlers(dp)
-    
-    # Настраиваем планировщик
-    global scheduler
-    scheduler = setup_scheduler(bot, session_factory)
-    
-    # Автоматически настраиваем webhook для Render
+    logger.info("ENTERING on_startup")
     try:
-        # Получаем URL приложения из переменных окружения
-        app_url = os.environ.get('RENDER_EXTERNAL_URL')
-        if not app_url:
-            app_url = os.environ.get('APP_URL', 'https://paytonbot.onrender.com')
-            logger.warning(f"RENDER_EXTERNAL_URL not found, using fallback URL: {app_url}")
+        logger.info("Calling init_db...")
+        session_factory, engine = await init_db()
+        logger.info("init_db finished successfully.")
         
-        bot_token = os.getenv("BOT_TOKEN")
-        webhook_url = f"{app_url}/webhook/{bot_token}"
+        # Устанавливаем сессию и токен платежей
+        logger.info("Setting dp values (session_factory, payment_token, engine)...")
+        dp["session_factory"] = session_factory
+        dp["payment_provider_token"] = os.getenv("PAYMENT_PROVIDER_TOKEN")
+        dp["engine"] = engine
+        logger.info("dp values set.")
         
-        logger.info(f"Настраиваем webhook на {webhook_url}")
-        response = requests.get(f"https://api.telegram.org/bot{bot_token}/setWebhook?url={webhook_url}")
-        result = response.json()
-        if result.get("ok"):
-            logger.info(f"Webhook успешно установлен на {webhook_url}")
-        else:
-            logger.error(f"Ошибка при установке webhook: {result}")
+        # Регистрируем обработчики
+        logger.info("Registering handlers...")
+        register_all_handlers(dp)
+        logger.info("Handlers registered.")
+        
+        # Настраиваем планировщик
+        logger.info("Setting up scheduler...")
+        global scheduler
+        scheduler = setup_scheduler(bot, session_factory)
+        logger.info("Scheduler set up.")
+        
+        # Автоматически настраиваем webhook для Render
+        try:
+            logger.info("Setting up webhook...")
+            # Получаем URL приложения из переменных окружения
+            app_url = os.environ.get('RENDER_EXTERNAL_URL')
+            if not app_url:
+                app_url = os.environ.get('APP_URL', 'https://paytonbot.onrender.com')
+                logger.warning(f"RENDER_EXTERNAL_URL not found, using fallback URL: {app_url}")
+            
+            bot_token = os.getenv("BOT_TOKEN")
+            webhook_url = f"{app_url}/webhook/{bot_token}"
+            
+            logger.info(f"Настраиваем webhook на {webhook_url}")
+            response = requests.get(f"https://api.telegram.org/bot{bot_token}/setWebhook?url={webhook_url}")
+            result = response.json()
+            if result.get("ok"):
+                logger.info(f"Webhook успешно установлен на {webhook_url}")
+            else:
+                logger.error(f"Ошибка при установке webhook: {result}")
+            logger.info(f"Webhook setup attempt finished. Result: {result}")
+        except Exception as e:
+            logger.error(f"Ошибка при установке webhook: {e}", exc_info=True)
+        
+        logger.info("Bot startup process nearly complete.")
+        
     except Exception as e:
-        logger.error(f"Ошибка при установке webhook: {e}")
-    
-    logger.info("Bot started with webhook!")
-    
+        logger.error(f"CRITICAL ERROR during on_startup: {e}", exc_info=True)
+        # Важно выбросить исключение, чтобы loop_task завершилась с ошибкой
+        raise 
+        
+    logger.info("EXITING on_startup successfully")
     return dp
 
 # Cleanup function
