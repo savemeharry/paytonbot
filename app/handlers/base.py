@@ -32,10 +32,27 @@ async def cmd_start(message: types.Message):
             InlineKeyboardButton(text="ℹ️ Помощь", callback_data="help")
         )
         
-        # Enhanced logging
-        logger.info(f"[DEBUG] Message object: chat_id={message.chat.id}, from_user={message.from_user.id}")
-        if hasattr(message.bot, 'data'):
-            logger.info(f"[DEBUG] Bot data keys: {list(message.bot.data.keys())}")
+        # Get the bot instance - check multiple ways
+        bot_instance = None
+        try:
+            # Try to get from message
+            bot_instance = message.bot
+            logger.info(f"[DEBUG] Got bot from message")
+        except Exception as e1:
+            try:
+                # Try to get current bot
+                from aiogram import Bot
+                bot_instance = Bot.get_current()
+                logger.info(f"[DEBUG] Got bot from current")
+            except Exception as e2:
+                # Use global bot as last resort
+                from webhook import bot as global_bot
+                bot_instance = global_bot
+                logger.info(f"[DEBUG] Using global bot")
+        
+        # Log bot data keys if available
+        if hasattr(bot_instance, 'data'):
+            logger.info(f"[DEBUG] Bot data keys: {list(bot_instance.data.keys())}")
         
         # Send the welcome message
         logger.info(f"[DEBUG] About to send message to user {message.from_user.id}")
