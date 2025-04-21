@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, BigInteger
 
 from app.models.base import Base
 
@@ -7,7 +7,7 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, unique=True, nullable=False)
+    user_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String, nullable=True)
     first_name = Column(String, nullable=True)
     last_name = Column(String, nullable=True)

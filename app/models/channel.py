@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text
+from sqlalchemy import Column, Integer, String, Boolean, Text, BigInteger
 
 from app.models.base import Base
 
@@ -6,7 +6,7 @@ class Channel(Base):
     __tablename__ = "channels"
     
     id = Column(Integer, primary_key=True)
-    channel_id = Column(Integer, unique=True, nullable=False)
+    channel_id = Column(BigInteger, unique=True, nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
