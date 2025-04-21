@@ -193,11 +193,11 @@ def ensure_dp_initialized():
         future = asyncio.run_coroutine_threadsafe(_wait_for_task(loop_task), loop)
         try:
             # Ждем завершения исходной задачи с таймаутом
-            initialized_dp = future.result(timeout=10) 
+            initialized_dp = future.result(timeout=30)
             logger.info(f"Диспетчер успешно инициализирован через ожидание: {initialized_dp}")
             return initialized_dp
         except TimeoutError:
-             logger.warning("Таймаут (10с) ожидания инициализации диспетчера. Используем глобальный dp.")
+             logger.warning("Таймаут (30с) ожидания инициализации диспетчера. Используем глобальный dp.")
              # Не устанавливаем initialized_dp, чтобы пробовать снова при след. запросе
              return dp # Возвращаем пока глобальный
         except Exception as e:
