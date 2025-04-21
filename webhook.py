@@ -150,7 +150,7 @@ time.sleep(1)
 
 def ensure_dp_initialized():
     """Make sure dispatcher is initialized before handling requests"""
-    global initialized_dp
+    global initialized_dp, loop_task
     if initialized_dp is None:
         # Проверка, завершена ли задача
         if loop_task.done():
@@ -158,21 +158,33 @@ def ensure_dp_initialized():
             if loop_task.exception():
                 logger.error(f"Ошибка при инициализации бота: {loop_task.exception()}")
                 # Перезапускаем задачу инициализации
-                loop.create_task(on_startup())
+                loop_task = loop.create_task(on_startup())
                 return dp
                 
             # Если задача завершена успешно, получаем результат
             initialized_dp = loop_task.result()
+            logger.info(f"Диспетчер инициализирован: {initialized_dp}")
+            return initialized_dp
         else:
-            # Просто возвращаем глобальный диспетчер без ожидания
-            # Это позволит быстрее отвечать на запросы
-            return dp
+            # Ждем завершения инициализации
+            logger.info("Ожидаем инициализации диспетчера...")
+            try:
+                # Блокирующее ожидание с таймаутом
+                initialized_dp = asyncio.run_coroutine_threadsafe(
+                    asyncio.shield(on_startup()), loop
+                ).result(timeout=10)
+                logger.info(f"Диспетчер успешно инициализирован: {initialized_dp}")
+                return initialized_dp
+            except Exception as e:
+                logger.error(f"Ошибка при ожидании инициализации: {e}")
+                return dp
     return initialized_dp
 
 # Эндпоинт для вебхука
 @app.route('/webhook/' + os.getenv("BOT_TOKEN"), methods=['POST'])
 def webhook():
-    dp = ensure_dp_initialized()
+    dispatcher = ensure_dp_initialized()
+    logger.info(f"Используем диспетчер: {dispatcher}")
     
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
@@ -191,17 +203,34 @@ def webhook():
             update = types.Update(**json_data)
             
             # Создаем задачу для обработки обновления и записываем её в переменную
-            async def process_webhook_update(update_obj):
+            async def process_webhook_update(update_obj, dispatcher):
                 try:
                     logger.info(f"Начинаем обработку обновления ID: {update_obj.update_id}")
-                    await dp.process_update(update_obj)
+                    logger.info(f"Диспетчер: {dispatcher}, доступные данные: {list(dispatcher.data.keys() if hasattr(dispatcher, 'data') else [])}")
+                    
+                    # Явно проверим наличие обработчиков
+                    handlers_count = len(dispatcher.handlers.values())
+                    logger.info(f"Количество групп обработчиков: {handlers_count}")
+                    for group_id, handlers in dispatcher.handlers.items():
+                        logger.info(f"Группа {group_id}: {len(handlers)} обработчиков")
+                    
+                    # Принудительно пробуем найти обработчик для команды /start
+                    if hasattr(update_obj, 'message') and update_obj.message and update_obj.message.text == '/start':
+                        from app.handlers.base import cmd_start
+                        logger.info("Принудительно вызываем обработчик /start")
+                        await cmd_start(update_obj.message)
+                        logger.info("Обработчик /start выполнен")
+                        return
+                    
+                    # Стандартная обработка через диспетчер
+                    await dispatcher.process_update(update_obj)
                     logger.info(f"Завершена обработка обновления ID: {update_obj.update_id}")
                 except Exception as e:
                     logger.error(f"Ошибка при обработке обновления: {e}", exc_info=True)
             
             # Создаем задачу для обработки обновления
             future = asyncio.run_coroutine_threadsafe(
-                process_webhook_update(update),
+                process_webhook_update(update, dispatcher),
                 loop
             )
             
