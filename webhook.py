@@ -160,153 +160,105 @@ def shutdown_event():
 
 atexit.register(shutdown_event)
 
-# Запуск фоновой задачи для event loop
-def run_event_loop():
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+# # Запуск фоновой задачи для event loop (УДАЛЕНО)
+# def run_event_loop():
+#     try:
+#         loop.run_forever()
+#     except KeyboardInterrupt:
+#         pass
+#     finally:
+#         loop.run_until_complete(loop.shutdown_asyncgens())
+#         loop.close()
 
-# Инициализируем диспетчер в новом цикле событий
-asyncio.set_event_loop(loop)
-loop_task = loop.create_task(on_startup())
-initialized_dp = None
+# # Инициализируем диспетчер в новом цикле событий (УДАЛЕНО)
+# asyncio.set_event_loop(loop)
+# loop_task = loop.create_task(on_startup())
 
-# Запускаем фоновую задачу для event loop
-import threading
-threading.Thread(target=run_event_loop, daemon=True).start()
+# # Запускаем фоновую задачу для event loop (УДАЛЕНО)
+# import threading
+# threading.Thread(target=run_event_loop, daemon=True).start()
 
-# Небольшая задержка для начала инициализации
-time.sleep(1)
+# # Global flag instead of storing the result (УДАЛЕНО)
+# is_dp_initialized_successfully = None # None: Unknown, True: Success, False: Failed
 
-# Глобальная переменная для хранения количества попыток инициализации
-global init_attempts
-init_attempts = 0
+# def ensure_dp_initialized(): (УДАЛЕНО)
+#     """Check initialization status without blocking excessively"""
+#     # ... (весь код функции удален)
 
-def ensure_dp_initialized():
-    """Make sure dispatcher is initialized before handling requests"""
-    global initialized_dp, loop_task
-    
-    if initialized_dp:
-        return initialized_dp
+# --- Новая синхронная инициализация при старте воркера --- 
+try:
+    logger.info("Starting synchronous initialization via asyncio.run(on_startup())...")
+    # Запускаем on_startup синхронно. Это заполнит глобальный dp.
+    asyncio.run(on_startup())
+    logger.info("Synchronous initialization finished successfully.")
+except Exception as init_error:
+    logger.critical(f"CRITICAL: Failed synchronous initialization: {init_error}", exc_info=True)
+    # Если инициализация не удалась, приложение, вероятно, не сможет работать.
+    # Можно либо выйти, либо оставить как есть, но бот не будет работать.
+    # raise SystemExit("Bot initialization failed") # Раскомментируйте, чтобы остановить Gunicorn при ошибке
+# ----------------------------------------------------------
 
-    logger.info("Проверяем инициализацию диспетчера...")
+# Функция для синхронного вызова корутины (НЕ ИСПОЛЬЗУЕТСЯ БОЛЬШЕ, можно удалить позже)
+# def run_sync(coroutine):
+#     """Synchronously run a coroutine in the event loop"""
+#     try:
+#         # Используем текущий event loop
+#         current_loop = asyncio.get_event_loop()
+#         future = asyncio.run_coroutine_threadsafe(coroutine, current_loop)
+#         return future.result(timeout=10)  # 10 second timeout
+#     except Exception as e:
+#         logger.error(f"Ошибка при синхронном выполнении корутины: {e}", exc_info=True)
+#         return None
 
-    if loop_task.done():
-        logger.info("Задача инициализации loop_task завершена.")
-        try:
-            # Проверяем, не было ли ошибки в самой задаче
-            exception = loop_task.exception()
-            if exception:
-                logger.error(f"Ошибка в задаче инициализации on_startup: {exception}", exc_info=exception)
-                logger.warning("Используем глобальный dp из-за ошибки инициализации.")
-                initialized_dp = dp # Можно считать инициализацию проваленной
-                return dp
-            else:
-                # Ошибки не было, получаем результат
-                initialized_dp = loop_task.result()
-                logger.info(f"Диспетчер успешно инициализирован (задача была завершена): {initialized_dp}")
-                return initialized_dp
-        except asyncio.InvalidStateError:
-            logger.warning("Не удалось получить результат loop_task, хотя она помечена как done. Используем глобальный dp.")
-            initialized_dp = dp
-            return dp
-        except Exception as e:
-             logger.error(f"Неожиданная ошибка при проверке завершенной loop_task: {e}", exc_info=True)
-             initialized_dp = dp
-             return dp
-    else:
-        logger.info("Задача инициализации loop_task еще не завершена. Ожидаем...")
-        # Создаем корутину, которая просто ждет исходную задачу
-        async def _wait_for_task(task):
-            return await task
-
-        future = asyncio.run_coroutine_threadsafe(_wait_for_task(loop_task), loop)
-        try:
-            # Ждем завершения исходной задачи с таймаутом
-            initialized_dp = future.result(timeout=30)
-            logger.info(f"Диспетчер успешно инициализирован через ожидание: {initialized_dp}")
-            return initialized_dp
-        except TimeoutError:
-             logger.warning("Таймаут (30с) ожидания инициализации диспетчера. Используем глобальный dp.")
-             # Не устанавливаем initialized_dp, чтобы пробовать снова при след. запросе
-             return dp # Возвращаем пока глобальный
-        except Exception as e:
-             logger.error(f"Ошибка при ожидании инициализации через run_coroutine_threadsafe: {e}", exc_info=True)
-             # Проверим, не завершилась ли сама задача с ошибкой за это время
-             if loop_task.done() and loop_task.exception():
-                 logger.error(f"Исходная задача инициализации loop_task завершилась с ошибкой: {loop_task.exception()}", exc_info=loop_task.exception())
-             logger.warning("Используем глобальный dp из-за ошибки ожидания.")
-             # Не устанавливаем initialized_dp
-             return dp # Возвращаем пока глобальный
-
-# Функция для синхронного вызова корутины
-def run_sync(coroutine):
-    """Synchronously run a coroutine in the event loop"""
-    try:
-        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-        return future.result(timeout=10)  # 10 second timeout
-    except Exception as e:
-        logger.error(f"Ошибка при синхронном выполнении корутины: {e}", exc_info=True)
-        return None
-
-# Синхронные функции для обработки сообщений с помощью обработчиков
-def process_start_command(user_id, message_obj):
-    """Process /start command"""
-    from app.handlers.base import cmd_start
-    return run_sync(cmd_start(message_obj))
-
-def process_help_command(user_id, message_obj):
-    """Process /help command"""
-    from app.handlers.base import cmd_help
-    return run_sync(cmd_help(message_obj))
-
-def process_mysubscriptions_command(user_id, message_obj):
-    """Process /mysubscriptions command"""
-    from app.handlers.base import cmd_my_subscriptions
-    return run_sync(cmd_my_subscriptions(message_obj))
+# # Синхронные функции для обработки сообщений (НЕ ИСПОЛЬЗУЮТСЯ БОЛЬШЕ, можно удалить позже)
+# def process_start_command(user_id, message_obj):
+# ...
 
 # Эндпоинт для вебхука
 @app.route('/webhook/' + os.getenv("BOT_TOKEN"), methods=['POST'])
 def webhook():
-    dispatcher = ensure_dp_initialized()
-    logger.info(f"Используем диспетчер: {dispatcher}")
+    # Используем напрямую глобальный dp, который должен быть инициализирован
+    # logger.info(f"Using dispatcher: {dp}") # Можно раскомментировать для отладки
     
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         
         try:
             import json
-            # Правильно парсим JSON перед созданием объекта Update
             json_data = json.loads(json_string)
-            logger.info(f"Получен webhook: {json_data.get('update_id')} - тип: {list(json_data.keys())}")
-
-            # Создаем объект Update
+            # logger.info(f"Received webhook: {json_data.get('update_id')} - type: {list(json_data.keys())}") # Отладочный лог
+            
             update = types.Update(**json_data)
             
-            # Проверяем статус event loop (опционально, для отладки)
-            logger.info(f"Статус event loop: работает={not loop.is_closed()}, "
-                       f"количество задач={len(asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else [])}")
+            # logger.info(f"Event loop status: running={asyncio.get_event_loop().is_running()}") # Отладочный лог
 
             # Передаем ВСЕ обновления в диспетчер для асинхронной обработки
-            # Не ждем результата future.result()
             try:
+                # Получаем текущий event loop для run_coroutine_threadsafe
+                current_loop = asyncio.get_event_loop()
+                if not current_loop.is_running():
+                    logger.error("CRITICAL: Event loop obtained by get_event_loop() is not running!")
+                    # Попытка запустить основной цикл, если еще не запущен (экспериментально)
+                    # Это может не работать корректно с Gunicorn
+                    # threading.Thread(target=current_loop.run_forever, daemon=True).start()
+                    # logger.info("Attempted to start the obtained event loop in a new thread.")
+                    # return Response(status=500) # Возвращаем ошибку, т.к. обработка невозможна
+                    
                 future = asyncio.run_coroutine_threadsafe(
-                    dispatcher.process_update(update),
-                    loop
+                    dp.process_update(update),
+                    current_loop
                 )
-                # future.result(timeout=10) # Убираем ожидание результата
-                logger.info(f"Update {json_data.get('update_id')} передан в диспетчер.")
+                # Не ждем результата future.result()
+                # logger.info(f"Update {json_data.get('update_id')} passed to dispatcher.") # Отладочный лог
+            except RuntimeError as e:
+                 if "cannot schedule new futures after shutdown" in str(e):
+                      logger.warning(f"Event loop seems to be shutting down. Could not process update {json_data.get('update_id')}.")
+                 elif "no running event loop" in str(e):
+                      logger.error("CRITICAL: No running event loop found to schedule update processing!")
+                 else:
+                      logger.error(f"RuntimeError submitting update {json_data.get('update_id')} to dispatcher: {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"Ошибка при передаче обновления {json_data.get('update_id')} в диспетчер: {e}", exc_info=True)
-                # Можно добавить резервную отправку сообщения об ошибке, если необходимо
-                # user_id = json_data.get('message', {}).get('from', {}).get('id') or \\
-                #           json_data.get('callback_query', {}).get('from', {}).get('id')
-                # if user_id:
-                #     send_direct_message(user_id, "Произошла внутренняя ошибка при обработке вашего запроса.")
+                logger.error(f"Error submitting update {json_data.get('update_id')} to dispatcher: {e}", exc_info=True)
             
             return Response(status=200) # Отвечаем Telegram сразу
 
@@ -347,13 +299,9 @@ def send_direct_message(chat_id, text, parse_mode='HTML', reply_markup=None):
 # Эндпоинт для проверки работы приложения
 @app.route('/')
 def index():
-    # Ensure the bot is initialized, но без блокировки
-    try:
-        ensure_dp_initialized()
-        return 'Бот работает! Webhook активен.'
-    except Exception as e:
-        logger.error(f"Ошибка при инициализации бота: {e}", exc_info=True)
-        return 'Бот пытается запуститься. Проверьте логи.'
+    # Просто возвращаем статус, т.к. инициализация должна была пройти при старте
+    # Проверять dp здесь не очень надежно
+    return 'Бот запущен. Проверьте его работоспособность командой /start.'
 
 # Для запуска приложения
 if __name__ == '__main__':
