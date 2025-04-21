@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import requests
 import atexit
 import time
+import json
 
 from app.models.base import Base
 from app.handlers import register_all_handlers
@@ -237,7 +238,7 @@ def ensure_dp_initialized():
 # Эндпоинт для вебхука
 @app.route('/webhook/' + os.getenv("BOT_TOKEN"), methods=['POST'])
 def webhook():
-    # Проверяем статус инициализации (ВОЗВРАЩЕНО)
+    # Проверяем статус инициализации
     dispatcher = ensure_dp_initialized()
     if not dispatcher:
         logger.error("Dispatcher is None after ensure_dp_initialized, returning 500")
@@ -249,56 +250,65 @@ def webhook():
         json_string = request.get_data().decode('utf-8')
         
         try:
-            import json
             json_data = json.loads(json_string)
+            
+            # Log the raw update for debugging
+            logger.info(f"[DEBUG] Raw update: {json_string[:200]}...")
+            
+            # Create the Update object
             update = types.Update(**json_data)
             
             # Log important update info for debugging
-            update_type = None
+            update_type = "unknown"
+            chat_id = None
+            
             if update.message:
-                update_type = f"message from {update.message.from_user.id}"
+                update_type = "message"
+                chat_id = update.message.chat.id
                 if update.message.text:
                     update_type += f" with text: {update.message.text}"
             elif update.callback_query:
                 update_type = f"callback_query with data: {update.callback_query.data}"
+                chat_id = update.callback_query.message.chat.id if update.callback_query.message else None
             
-            logger.info(f"Processing update {update.update_id} of type: {update_type}")
+            logger.info(f"[DEBUG] Processing update {update.update_id} of type: {update_type}, chat_id: {chat_id}")
             
-            # Передаем ВСЕ обновления в диспетчер для асинхронной обработки
-            try:
-                # Используем глобальный loop из фонового потока
-                future = asyncio.run_coroutine_threadsafe(
-                    dispatcher.process_update(update),  # Process directly instead of using wrapper
-                    loop  # Используем глобальный loop
-                )
-                
-                # Try to get result with a short timeout for better error reporting
+            # Use a background task to process the update
+            def process_update_task():
                 try:
-                    future.result(0.1)  # Don't block too long in case of issues
-                    logger.info(f"Update {update.update_id} successfully processed")
-                except asyncio.TimeoutError:
-                    # This is expected, we don't need to wait for complete processing
-                    logger.info(f"Update {update.update_id} processing continues in background")
+                    # Create a new event loop for this thread
+                    task_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(task_loop)
+                    
+                    # Process the update in this dedicated event loop
+                    task_loop.run_until_complete(dispatcher.process_update(update))
+                    logger.info(f"[DEBUG] Update {update.update_id} processed successfully in dedicated task")
+                    
+                    # Close the event loop when done
+                    task_loop.close()
                 except Exception as e:
-                    logger.error(f"Error in update {update.update_id} processing: {e}", exc_info=True)
+                    logger.error(f"[DEBUG] Error processing update {update.update_id} in task: {e}", exc_info=True)
                     
-            except RuntimeError as e:
-                if "cannot schedule new futures after shutdown" in str(e):
-                    logger.warning(f"Event loop seems to be shutting down. Could not process update {update.update_id}.")
-                else:
-                    logger.error(f"RuntimeError submitting update {update.update_id} to dispatcher: {e}", exc_info=True)
-                
-                # Fallback: Try direct message sending for commands
-                if update.message and update.message.text and update.message.text.startswith('/'):
-                    chat_id = update.message.chat.id
-                    send_direct_message(chat_id, "Извините, бот перезагружается. Попробуйте позже.")
-                    logger.info(f"Sent fallback message to {chat_id}")
-                    
-            except Exception as e:
-                logger.error(f"Error submitting update {update.update_id} to dispatcher: {e}", exc_info=True)
+                    # Fallback: Try direct message sending for failed commands
+                    if chat_id and update.message and update.message.text and update.message.text.startswith('/'):
+                        try:
+                            fallback_text = "Извините, произошла ошибка при обработке команды. Попробуйте позже."
+                            send_direct_message(chat_id, fallback_text)
+                            logger.info(f"[DEBUG] Sent fallback message to {chat_id}")
+                        except Exception as fallback_error:
+                            logger.error(f"[DEBUG] Fallback message failed: {fallback_error}", exc_info=True)
             
-            return Response(status=200)  # Отвечаем Telegram сразу
-
+            # Start a thread to process the update
+            import threading
+            update_thread = threading.Thread(target=process_update_task)
+            update_thread.daemon = True
+            update_thread.start()
+            
+            logger.info(f"[DEBUG] Started background thread for update {update.update_id}")
+            
+            # Return immediately to acknowledge receipt
+            return Response(status=200)
+            
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка декодирования JSON: {e}", exc_info=True)
             return Response(status=400)
@@ -346,7 +356,6 @@ def status():
             "webhook_url": f"{os.environ.get('RENDER_EXTERNAL_URL', 'Unknown')}/webhook/{os.getenv('BOT_TOKEN')}"
         }
         
-        import json
         return Response(json.dumps(status_info, indent=2), mimetype='application/json')
     except Exception as e:
         logger.error(f"Error in status endpoint: {e}", exc_info=True)
@@ -356,24 +365,84 @@ def status():
 def send_direct_message(chat_id, text, parse_mode='HTML', reply_markup=None):
     """Send message directly via Telegram API"""
     try:
+        logger.info(f"[DEBUG] Attempting to send direct message to chat_id: {chat_id}")
         bot_token = os.getenv("BOT_TOKEN")
+        if not bot_token:
+            logger.error("[DEBUG] BOT_TOKEN environment variable is not set!")
+            return {"error": "BOT_TOKEN not set"}
+            
         send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         
         payload = {
             'chat_id': chat_id,
-            'text': text,
-            'parse_mode': parse_mode
+            'text': text
         }
+        
+        # Only add parse_mode if it's HTML or Markdown to avoid API errors
+        if parse_mode in ['HTML', 'Markdown', 'MarkdownV2']:
+            payload['parse_mode'] = parse_mode
         
         if reply_markup:
             payload['reply_markup'] = reply_markup
             
-        response = requests.post(send_url, json=payload)
-        logger.info(f"Прямой ответ отправлен: {response.json()}")
-        return response.json()
+        # Log the request we're about to make
+        logger.info(f"[DEBUG] Sending request to {send_url} with payload: {payload}")
+        
+        response = requests.post(send_url, json=payload, timeout=10)
+        
+        # Log both status code and response content
+        logger.info(f"[DEBUG] Direct message API response: Status {response.status_code}, Content: {response.text[:200]}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"[DEBUG] Direct message sent successfully: {result}")
+            return result
+        else:
+            logger.error(f"[DEBUG] Direct message API error: Status {response.status_code}, Response: {response.text}")
+            return {"error": f"API returned status {response.status_code}"}
+            
     except Exception as e:
-        logger.error(f"Ошибка при отправке прямого сообщения: {e}", exc_info=True)
-        return None
+        error_msg = f"Error sending direct message: {str(e)}"
+        logger.error(f"[DEBUG] {error_msg}", exc_info=True)
+        return {"error": error_msg}
+
+# Эндпоинт для проверки бота через прямую отправку команды
+@app.route('/test_bot_command')
+def test_bot_command():
+    try:
+        # Create a test update that simulates a /start command
+        bot_token = os.getenv("BOT_TOKEN")
+        
+        # Get bot info to extract bot user id
+        response = requests.get(f"https://api.telegram.org/bot{bot_token}/getMe")
+        bot_info = response.json()
+        
+        if not bot_info.get('ok'):
+            return f"Error getting bot info: {bot_info}"
+        
+        bot_user = bot_info['result']
+        
+        # Get optional test_chat_id parameter or use default
+        test_chat_id = request.args.get('chat_id', '300181690')  # Default to your user ID
+        
+        # Log what we're about to do
+        logger.info(f"[DEBUG] Testing bot with direct command to chat_id {test_chat_id}")
+        
+        # Use the direct message API to send a message
+        result = send_direct_message(
+            test_chat_id, 
+            "🤖 Тестовое сообщение напрямую через API.\n\nБот @" + bot_user['username'] + " работает!"
+        )
+        
+        # Return results as JSON
+        return Response(
+            json.dumps({"sent_message": result, "bot_info": bot_user}, indent=2, ensure_ascii=False),
+            mimetype='application/json'
+        )
+        
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in test_bot_command: {e}", exc_info=True)
+        return f"Error: {str(e)}"
 
 # Для запуска приложения
 if __name__ == '__main__':
