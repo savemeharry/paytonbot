@@ -197,43 +197,56 @@ def webhook():
             
             if 'message' in json_data:
                 message_data = json_data.get('message', {})
-                logger.info(f"Сообщение от: {message_data.get('from', {}).get('id')} - "
-                           f"текст: {message_data.get('text', 'Нет текста')}")
+                user_id = message_data.get('from', {}).get('id')
+                text = message_data.get('text', 'Нет текста')
+                logger.info(f"Сообщение от: {user_id} - текст: {text}")
+                
+                # Для команды /start делаем прямую отправку
+                if text == '/start':
+                    logger.info("Обнаружена команда /start. Отправляем прямой ответ.")
+                    try:
+                        bot_token = os.getenv("BOT_TOKEN")
+                        welcome_text = f"Привет! Это тестовый ответ бота. Вы отправили команду: {text}"
+                        
+                        # Прямой вызов API Telegram для отправки сообщения
+                        send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                        payload = {
+                            'chat_id': user_id,
+                            'text': welcome_text,
+                            'parse_mode': 'HTML'
+                        }
+                        response = requests.post(send_url, json=payload)
+                        logger.info(f"Прямой ответ отправлен: {response.json()}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке прямого ответа: {e}", exc_info=True)
             
             update = types.Update(**json_data)
             
-            # Создаем задачу для обработки обновления и записываем её в переменную
+            # Создаем задачу для обработки обновления
             async def process_webhook_update(update_obj, dispatcher):
                 try:
-                    logger.info(f"Начинаем обработку обновления ID: {update_obj.update_id}")
-                    logger.info(f"Диспетчер: {dispatcher}, доступные данные: {list(dispatcher.data.keys() if hasattr(dispatcher, 'data') else [])}")
+                    logger.info(f"[ASYNC] Начинаем обработку обновления ID: {update_obj.update_id}")
+                    logger.info(f"[ASYNC] Диспетчер: {dispatcher}, доступные данные: {list(dispatcher.data.keys() if hasattr(dispatcher, 'data') else [])}")
                     
                     # Явно проверим наличие обработчиков
                     handlers_count = len(dispatcher.handlers.values())
-                    logger.info(f"Количество групп обработчиков: {handlers_count}")
+                    logger.info(f"[ASYNC] Количество групп обработчиков: {handlers_count}")
                     for group_id, handlers in dispatcher.handlers.items():
-                        logger.info(f"Группа {group_id}: {len(handlers)} обработчиков")
+                        logger.info(f"[ASYNC] Группа {group_id}: {len(handlers)} обработчиков")
                     
-                    # Принудительно пробуем найти обработчик для команды /start
-                    if hasattr(update_obj, 'message') and update_obj.message and update_obj.message.text == '/start':
-                        from app.handlers.base import cmd_start
-                        logger.info("Принудительно вызываем обработчик /start")
-                        await cmd_start(update_obj.message)
-                        logger.info("Обработчик /start выполнен")
-                        return
-                    
-                    # Стандартная обработка через диспетчер
+                    # Пробуем стандартную обработку через диспетчер
                     await dispatcher.process_update(update_obj)
-                    logger.info(f"Завершена обработка обновления ID: {update_obj.update_id}")
+                    logger.info(f"[ASYNC] Завершена обработка обновления ID: {update_obj.update_id}")
                 except Exception as e:
-                    logger.error(f"Ошибка при обработке обновления: {e}", exc_info=True)
+                    logger.error(f"[ASYNC] Ошибка при обработке обновления: {e}", exc_info=True)
             
-            # Создаем задачу для обработки обновления
+            # Запускаем асинхронную обработку в фоне
             future = asyncio.run_coroutine_threadsafe(
-                process_webhook_update(update, dispatcher),
+                process_webhook_update(update, dispatcher), 
                 loop
             )
             
+            # Не ждем результат
             return Response(status=200)
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка декодирования JSON: {e}", exc_info=True)
