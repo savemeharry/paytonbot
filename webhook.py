@@ -252,10 +252,11 @@ def webhook():
                 if text == '/start':
                     logger.info("Обнаружена команда /start. Вызываем обработчик.")
                     try:
-                        # Создаем синхронно объект сообщения
-                        message_obj = types.Message.to_object(message_data)
-                        # Инициализируем сообщение с данными бота
-                        message_obj.bot = bot
+                        # Создаем сообщение правильным образом для aiogram 2.x
+                        # Мы должны использовать _bot внутренне, а не присваивать напрямую
+                        message_obj = types.Message(**message_data)
+                        # Добавляем бота в объект сообщения, используя внутренний трюк
+                        setattr(message_obj, '_bot', bot)
                         
                         # Вызываем обработчик
                         result = process_start_command(user_id, message_obj)
@@ -268,8 +269,10 @@ def webhook():
                 elif text == '/help':
                     logger.info("Обнаружена команда /help. Вызываем обработчик.")
                     try:
-                        message_obj = types.Message.to_object(message_data)
-                        message_obj.bot = bot
+                        # Создаем сообщение с ботом
+                        message_obj = types.Message(**message_data)
+                        setattr(message_obj, '_bot', bot)
+                        
                         result = process_help_command(user_id, message_obj)
                         logger.info(f"Результат обработки /help: {result}")
                     except Exception as e:
@@ -279,8 +282,10 @@ def webhook():
                 elif text == '/mysubscriptions':
                     logger.info("Обнаружена команда /mysubscriptions. Вызываем обработчик.")
                     try:
-                        message_obj = types.Message.to_object(message_data)
-                        message_obj.bot = bot
+                        # Создаем сообщение с ботом
+                        message_obj = types.Message(**message_data)
+                        setattr(message_obj, '_bot', bot)
+                        
                         result = process_mysubscriptions_command(user_id, message_obj)
                         logger.info(f"Результат обработки /mysubscriptions: {result}")
                     except Exception as e:
