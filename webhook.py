@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 import requests
 import atexit
+import time
 
 from app.models.base import Base
 from app.handlers import register_all_handlers
@@ -130,12 +131,32 @@ asyncio.set_event_loop(loop)
 loop_task = loop.create_task(on_startup())
 initialized_dp = None
 
+# Запускаем фоновую задачу для event loop
+import threading
+threading.Thread(target=run_event_loop, daemon=True).start()
+
+# Небольшая задержка для начала инициализации
+time.sleep(1)
+
 def ensure_dp_initialized():
     """Make sure dispatcher is initialized before handling requests"""
     global initialized_dp
     if initialized_dp is None:
-        # Wait for initialization to complete
-        initialized_dp = loop.run_until_complete(loop_task)
+        # Проверка, завершена ли задача
+        if loop_task.done():
+            # Если задача завершена с ошибкой, логируем и пробуем перезапустить
+            if loop_task.exception():
+                logger.error(f"Ошибка при инициализации бота: {loop_task.exception()}")
+                # Перезапускаем задачу инициализации
+                loop.create_task(on_startup())
+                return dp
+                
+            # Если задача завершена успешно, получаем результат
+            initialized_dp = loop_task.result()
+        else:
+            # Просто возвращаем глобальный диспетчер без ожидания
+            # Это позволит быстрее отвечать на запросы
+            return dp
     return initialized_dp
 
 # Эндпоинт для вебхука
@@ -152,13 +173,15 @@ def webhook():
             json_data = json.loads(json_string)
             update = types.Update(**json_data)
             
-            # Обработка обновления в новом потоке
+            # Создаем задачу для обработки обновления
+            # но не ждем ее завершения, чтобы не блокировать ответ
             future = asyncio.run_coroutine_threadsafe(
                 dp.process_update(update),
                 loop
             )
-            # Wait for processing to complete with a timeout
-            future.result(timeout=60)
+            
+            # Не ждем выполнения будущего объекта
+            # Это предотвратит таймауты в Gunicorn
             return Response(status=200)
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка декодирования JSON: {e}", exc_info=True)
@@ -173,9 +196,13 @@ def webhook():
 # Эндпоинт для проверки работы приложения
 @app.route('/')
 def index():
-    # Ensure the bot is initialized
-    ensure_dp_initialized()
-    return 'Бот работает! Webhook активен.'
+    # Ensure the bot is initialized, но без блокировки
+    try:
+        ensure_dp_initialized()
+        return 'Бот работает! Webhook активен.'
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации бота: {e}", exc_info=True)
+        return 'Бот пытается запуститься. Проверьте логи.'
 
 # Запуск фоновой задачи для event loop
 def run_event_loop():
@@ -189,10 +216,6 @@ def run_event_loop():
 
 # Для запуска приложения
 if __name__ == '__main__':
-    # Start event loop in a separate thread
-    import threading
-    threading.Thread(target=run_event_loop, daemon=True).start()
-    
     # Получаем порт из переменной окружения для Render
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True) 
