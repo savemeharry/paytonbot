@@ -216,9 +216,14 @@ async def callback_refresh_subscriptions(callback_query: types.CallbackQuery):
     """Handle refresh subscriptions button"""
     await callback_query.answer()
     
-    # Emulate /mysubscriptions command
+    # Create a modified message with the correct user_id
+    message = callback_query.message
+    # Make sure the correct user_id is available
+    message.from_user = callback_query.from_user
+    
+    # Emulate /mysubscriptions command with the modified message
     from app.handlers.base import cmd_my_subscriptions
-    await cmd_my_subscriptions(callback_query.message)
+    await cmd_my_subscriptions(message)
 
 # Register subscription handlers
 def register_subscription_handlers(dp: Dispatcher):

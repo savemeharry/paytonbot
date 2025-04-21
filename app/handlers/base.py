@@ -189,16 +189,26 @@ async def callback_back_to_start(callback_query: types.CallbackQuery):
     """Handle back to start button"""
     await callback_query.answer()
     
-    # Call start command handler with the same message
-    await cmd_start(callback_query.message)
+    # Create a modified message with the correct user_id
+    message = callback_query.message
+    # Make sure the correct user_id is available
+    message.from_user = callback_query.from_user
+    
+    # Call start command handler with the modified message
+    await cmd_start(message)
 
 # Callback handler for help button
 async def callback_help(callback_query: types.CallbackQuery):
     """Handle help button"""
     await callback_query.answer()
     
-    # Call help command handler with the same message
-    await cmd_help(callback_query.message)
+    # Create a modified message with the correct user_id
+    message = callback_query.message
+    # Make sure the correct user_id is available
+    message.from_user = callback_query.from_user
+    
+    # Call help command handler with the modified message
+    await cmd_help(message)
 
 # Register base handlers
 def register_base_handlers(dp: Dispatcher):
