@@ -234,114 +234,41 @@ def webhook():
             # Правильно парсим JSON перед созданием объекта Update
             json_data = json.loads(json_string)
             logger.info(f"Получен webhook: {json_data.get('update_id')} - тип: {list(json_data.keys())}")
+
+            # Создаем объект Update
+            update = types.Update(**json_data)
             
-            if 'message' in json_data:
-                message_data = json_data.get('message', {})
-                user_id = message_data.get('from', {}).get('id')
-                text = message_data.get('text', 'Нет текста')
-                logger.info(f"Сообщение от: {user_id} - текст: {text}")
-                
-                # Создаем объект Update
-                update = types.Update(**json_data)
-                
-                # Проверяем статус event loop
-                logger.info(f"Статус event loop: работает={not loop.is_closed()}, "
-                           f"количество задач={len(asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else [])}")
-                
-                # Проверяем команды и вызываем соответствующие обработчики
-                if text == '/start':
-                    logger.info("Обнаружена команда /start. Вызываем обработчик.")
-                    try:
-                        # Создаем сообщение правильным образом для aiogram 2.x
-                        # Мы должны использовать _bot внутренне, а не присваивать напрямую
-                        message_obj = types.Message(**message_data)
-                        # Добавляем бота в объект сообщения, используя внутренний трюк
-                        setattr(message_obj, '_bot', bot)
-                        
-                        # Вызываем обработчик
-                        result = process_start_command(user_id, message_obj)
-                        logger.info(f"Результат обработки /start: {result}")
-                    except Exception as e:
-                        logger.error(f"Ошибка при обработке команды /start: {e}", exc_info=True)
-                        # Резервный ответ напрямую через API
-                        send_direct_message(user_id, "Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
-                
-                elif text == '/help':
-                    logger.info("Обнаружена команда /help. Вызываем обработчик.")
-                    try:
-                        # Создаем сообщение с ботом
-                        message_obj = types.Message(**message_data)
-                        setattr(message_obj, '_bot', bot)
-                        
-                        result = process_help_command(user_id, message_obj)
-                        logger.info(f"Результат обработки /help: {result}")
-                    except Exception as e:
-                        logger.error(f"Ошибка при обработке команды /help: {e}", exc_info=True)
-                        send_direct_message(user_id, "Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
-                
-                elif text == '/mysubscriptions':
-                    logger.info("Обнаружена команда /mysubscriptions. Вызываем обработчик.")
-                    try:
-                        # Создаем сообщение с ботом
-                        message_obj = types.Message(**message_data)
-                        setattr(message_obj, '_bot', bot)
-                        
-                        result = process_mysubscriptions_command(user_id, message_obj)
-                        logger.info(f"Результат обработки /mysubscriptions: {result}")
-                    except Exception as e:
-                        logger.error(f"Ошибка при обработке команды /mysubscriptions: {e}", exc_info=True)
-                        send_direct_message(user_id, "Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
-                
-                else:
-                    # Обрабатываем обычное сообщение через диспетчер
-                    logger.info("Получено обычное сообщение. Отправляем через диспетчер.")
-                    try:
-                        future = asyncio.run_coroutine_threadsafe(
-                            dispatcher.process_update(update),
-                            loop
-                        )
-                        # Не ждем результата
-                    except Exception as e:
-                        logger.error(f"Ошибка при обработке сообщения: {e}", exc_info=True)
-                        # Резервный ответ
-                        send_direct_message(user_id, "Я не понимаю эту команду. Пожалуйста, используйте /start, /help или /mysubscriptions.")
+            # Проверяем статус event loop (опционально, для отладки)
+            logger.info(f"Статус event loop: работает={not loop.is_closed()}, "
+                       f"количество задач={len(asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else [])}")
+
+            # Передаем ВСЕ обновления в диспетчер для асинхронной обработки
+            # Не ждем результата future.result()
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    dispatcher.process_update(update),
+                    loop
+                )
+                # future.result(timeout=10) # Убираем ожидание результата
+                logger.info(f"Update {json_data.get('update_id')} передан в диспетчер.")
+            except Exception as e:
+                logger.error(f"Ошибка при передаче обновления {json_data.get('update_id')} в диспетчер: {e}", exc_info=True)
+                # Можно добавить резервную отправку сообщения об ошибке, если необходимо
+                # user_id = json_data.get('message', {}).get('from', {}).get('id') or \\
+                #           json_data.get('callback_query', {}).get('from', {}).get('id')
+                # if user_id:
+                #     send_direct_message(user_id, "Произошла внутренняя ошибка при обработке вашего запроса.")
             
-            elif 'callback_query' in json_data:
-                # Обработка callback query (нажатие на кнопки)
-                logger.info("Получен callback query. Обрабатываем.")
-                callback_data = json_data.get('callback_query', {}).get('data', '')
-                user_id = json_data.get('callback_query', {}).get('from', {}).get('id')
-                logger.info(f"Callback от пользователя {user_id}: {callback_data}")
-                
-                update = types.Update(**json_data)
-                try:
-                    future = asyncio.run_coroutine_threadsafe(
-                        dispatcher.process_update(update),
-                        loop
-                    )
-                    # Не ждем результата
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке callback query: {e}", exc_info=True)
-            else:
-                # Все остальные типы обновлений обрабатываем через диспетчер
-                update = types.Update(**json_data)
-                try:
-                    future = asyncio.run_coroutine_threadsafe(
-                        dispatcher.process_update(update),
-                        loop
-                    )
-                    # Не ждем результата
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке обновления: {e}", exc_info=True)
-            
-            return Response(status=200)
+            return Response(status=200) # Отвечаем Telegram сразу
+
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка декодирования JSON: {e}", exc_info=True)
             return Response(status=400)
         except Exception as e:
             # Log the error but still return 200 to Telegram
             logger.error(f"Error processing update: {e}", exc_info=True)
-            return Response(status=200)
+            # Всегда отвечаем 200, чтобы Telegram не повторял отправку
+            return Response(status=200) 
     else:
         return Response(status=403)
 
