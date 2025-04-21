@@ -35,8 +35,14 @@ scheduler = None
 
 # Настройка базы данных
 async def init_db():
+    # Получаем URL базы данных и убеждаемся, что драйвер асинхронный
+    db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db")
+    # Заменяем обычный SQLite на асинхронный SQLite, если нужно
+    if db_url.startswith("sqlite:///"):
+        db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+    
     engine = create_async_engine(
-        os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db"), 
+        db_url, 
         echo=False
     )
     

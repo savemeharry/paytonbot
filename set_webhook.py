@@ -27,11 +27,13 @@ def set_webhook():
         app_url = os.environ.get('APP_URL')
         if not app_url:
             logger.error("URL приложения не найден в переменных окружения. Пожалуйста, укажите RENDER_EXTERNAL_URL или APP_URL.")
-            user_input = input("https://paytonbot.onrender.com")
+            user_input = input("Введите URL вашего приложения (например, https://yourapp.onrender.com): ")
             if not user_input:
-                logger.error("URL не введен. Выход.")
-                sys.exit(1)
-            app_url = user_input.strip()
+                # В случае пустого ввода используем значение по умолчанию
+                app_url = "https://paytonbot.onrender.com"
+                logger.warning(f"Используем URL по умолчанию: {app_url}")
+            else:
+                app_url = user_input.strip()
     
     WEBHOOK_URL = f"{app_url}/webhook/{BOT_TOKEN}"
     
