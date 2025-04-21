@@ -181,17 +181,30 @@ def webhook():
             import json
             # Правильно парсим JSON перед созданием объекта Update
             json_data = json.loads(json_string)
+            logger.info(f"Получен webhook: {json_data.get('update_id')} - тип: {list(json_data.keys())}")
+            
+            if 'message' in json_data:
+                message_data = json_data.get('message', {})
+                logger.info(f"Сообщение от: {message_data.get('from', {}).get('id')} - "
+                           f"текст: {message_data.get('text', 'Нет текста')}")
+            
             update = types.Update(**json_data)
             
+            # Создаем задачу для обработки обновления и записываем её в переменную
+            async def process_webhook_update(update_obj):
+                try:
+                    logger.info(f"Начинаем обработку обновления ID: {update_obj.update_id}")
+                    await dp.process_update(update_obj)
+                    logger.info(f"Завершена обработка обновления ID: {update_obj.update_id}")
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке обновления: {e}", exc_info=True)
+            
             # Создаем задачу для обработки обновления
-            # но не ждем ее завершения, чтобы не блокировать ответ
             future = asyncio.run_coroutine_threadsafe(
-                dp.process_update(update),
+                process_webhook_update(update),
                 loop
             )
             
-            # Не ждем выполнения будущего объекта
-            # Это предотвратит таймауты в Gunicorn
             return Response(status=200)
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка декодирования JSON: {e}", exc_info=True)
