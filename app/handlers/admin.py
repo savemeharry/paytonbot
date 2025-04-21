@@ -15,23 +15,47 @@ logger = logging.getLogger(__name__)
 async def cmd_admin(message: types.Message):
     """Handle /admin command - show admin panel"""
     user_id = message.from_user.id
-    session_factory = message.bot.get("session_factory")
+    logger.info(f"[DEBUG] cmd_admin for user {user_id}")
     
-    async with get_session(session_factory) as session:
-        # Check if user is admin
-        if not await is_admin(session, user_id):
-            await message.answer("У вас нет прав администратора.")
-            return
+    try:
+        # Create a fresh database connection for this event loop
+        import os
+        from dotenv import load_dotenv
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
         
-        # Show admin panel
-        admin_text = (
-            f"{hbold('Панель администратора:')}\n\n"
-            f"/admin_stats - Статистика бота\n"
-            f"/admin_channels - Управление каналами\n"
-            f"/admin_subs - Управление подписками\n"
-        )
+        # Load environment variables if needed
+        load_dotenv()
         
-        await message.answer(admin_text, parse_mode="HTML")
+        # Get database URL
+        db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db")
+        logger.info(f"[DEBUG] Creating new DB engine for admin with URL: {db_url[:db_url.find(':')]}://...elided...")
+        
+        # Create new engine and session factory for this event loop
+        engine = create_async_engine(db_url, echo=False, pool_timeout=30)
+        session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        
+        async with get_session(session_factory) as session:
+            # Check if user is admin
+            if not await is_admin(session, user_id):
+                await message.answer("У вас нет прав администратора.")
+                await engine.dispose()
+                return
+            
+            # Show admin panel
+            admin_text = (
+                f"{hbold('Панель администратора:')}\n\n"
+                f"/admin_stats - Статистика бота\n"
+                f"/admin_channels - Управление каналами\n"
+                f"/admin_subs - Управление подписками\n"
+            )
+            
+            await message.answer(admin_text, parse_mode="HTML")
+            await engine.dispose()
+    
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in cmd_admin: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 # Admin stats command handler
 async def cmd_admin_stats(message: types.Message):
@@ -70,41 +94,66 @@ async def cmd_admin_stats(message: types.Message):
 async def cmd_admin_channels(message: types.Message):
     """Handle /admin_channels command - show channels list"""
     user_id = message.from_user.id
-    session_factory = message.bot.get("session_factory")
+    logger.info(f"[DEBUG] cmd_admin_channels for user {user_id}")
     
-    async with get_session(session_factory) as session:
-        # Check if user is admin
-        if not await is_admin(session, user_id):
-            await message.answer("У вас нет прав администратора.")
-            return
+    try:
+        # Create a fresh database connection for this event loop
+        import os
+        from dotenv import load_dotenv
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
         
-        # Get all channels
-        channels = await session.execute(
-            "SELECT id, channel_id, name, is_active FROM channels"
-        )
-        channels = channels.all()
+        # Load environment variables if needed
+        load_dotenv()
         
-        if not channels:
-            await message.answer("Нет настроенных каналов.")
-            return
+        # Get database URL
+        db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db")
+        logger.info(f"[DEBUG] Creating new DB engine for admin_channels with URL: {db_url[:db_url.find(':')]}://...elided...")
         
-        # Show channels list
-        channels_text = f"{hbold('Список каналов:')}\n\n"
+        # Create new engine and session factory for this event loop
+        engine = create_async_engine(db_url, echo=False, pool_timeout=30)
+        session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         
-        for channel in channels:
-            id, channel_id, name, is_active = channel
-            status = "✅ Активен" if is_active else "❌ Неактивен"
-            channels_text += f"ID: {id} | {name} | {status}\n"
-            channels_text += f"Telegram ID: {channel_id}\n\n"
-        
-        channels_text += (
-            f"\n{hbold('Команды управления:')}\n"
-            f"/add_channel ID NAME - Добавить канал\n"
-            f"/toggle_channel ID - Вкл/выкл канал\n"
-            f"/add_tariff CHANNEL_ID NAME DAYS PRICE - Добавить тариф\n"
-        )
-        
-        await message.answer(channels_text, parse_mode="HTML")
+        async with get_session(session_factory) as session:
+            # Check if user is admin
+            if not await is_admin(session, user_id):
+                await message.answer("У вас нет прав администратора.")
+                await engine.dispose()
+                return
+            
+            # Get all channels
+            channels = await session.execute(
+                "SELECT id, channel_id, name, is_active FROM channels"
+            )
+            channels = channels.all()
+            
+            if not channels:
+                await message.answer("Нет настроенных каналов.")
+                await engine.dispose()
+                return
+            
+            # Show channels list
+            channels_text = f"{hbold('Список каналов:')}\n\n"
+            
+            for channel in channels:
+                id, channel_id, name, is_active = channel
+                status = "✅ Активен" if is_active else "❌ Неактивен"
+                channels_text += f"ID: {id} | {name} | {status}\n"
+                channels_text += f"Telegram ID: {channel_id}\n\n"
+            
+            channels_text += (
+                f"\n{hbold('Команды управления:')}\n"
+                f"/add_channel ID NAME - Добавить канал\n"
+                f"/toggle_channel ID - Вкл/выкл канал\n"
+                f"/add_tariff CHANNEL_ID NAME DAYS PRICE - Добавить тариф\n"
+            )
+            
+            await message.answer(channels_text, parse_mode="HTML")
+            await engine.dispose()
+    
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in cmd_admin_channels: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 # Admin subscriptions command handler
 async def cmd_admin_subs(message: types.Message):
@@ -157,52 +206,79 @@ async def cmd_admin_subs(message: types.Message):
 async def cmd_add_channel(message: types.Message):
     """Handle /add_channel command - add a new channel"""
     user_id = message.from_user.id
-    session_factory = message.bot.get("session_factory")
+    logger.info(f"[DEBUG] cmd_add_channel for user {user_id}")
     
-    async with get_session(session_factory) as session:
-        # Check if user is admin
-        if not await is_admin(session, user_id):
-            await message.answer("У вас нет прав администратора.")
-            return
+    try:
+        # Create a fresh database connection for this event loop
+        import os
+        from dotenv import load_dotenv
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
         
-        # Parse command arguments
-        try:
-            _, channel_id, *name_parts = message.text.split()
-            channel_id = int(channel_id)
-            name = " ".join(name_parts)
+        # Load environment variables if needed
+        load_dotenv()
+        
+        # Get database URL
+        db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db")
+        logger.info(f"[DEBUG] Creating new DB engine for add_channel with URL: {db_url[:db_url.find(':')]}://...elided...")
+        
+        # Create new engine and session factory for this event loop
+        engine = create_async_engine(db_url, echo=False, pool_timeout=30)
+        session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        
+        async with get_session(session_factory) as session:
+            # Check if user is admin
+            if not await is_admin(session, user_id):
+                await message.answer("У вас нет прав администратора.")
+                await engine.dispose()
+                return
             
-            if not name:
-                raise ValueError("Name is required")
+            # Parse command arguments
+            try:
+                _, channel_id, *name_parts = message.text.split()
+                channel_id = int(channel_id)
+                name = " ".join(name_parts)
                 
-        except ValueError as e:
-            await message.answer(
-                f"❌ Ошибка в формате команды: {e}\n"
-                f"Формат: /add_channel CHANNEL_ID NAME"
-            )
-            return
-        
-        # Check if channel already exists
-        existing_channel = await session.scalar(
-            f"SELECT id FROM channels WHERE channel_id = {channel_id}"
-        )
-        
-        if existing_channel:
-            await message.answer(f"❌ Канал с ID {channel_id} уже существует.")
-            return
-        
-        # Add channel to database
-        try:
-            # Create new channel
-            await session.execute(
-                "INSERT INTO channels (channel_id, name, is_active) VALUES (:channel_id, :name, 1)",
-                {"channel_id": channel_id, "name": name}
-            )
-            await session.commit()
+                if not name:
+                    raise ValueError("Name is required")
+                    
+            except ValueError as e:
+                await message.answer(
+                    f"❌ Ошибка в формате команды: {e}\n"
+                    f"Формат: /add_channel CHANNEL_ID NAME"
+                )
+                await engine.dispose()
+                return
             
-            await message.answer(f"✅ Канал {name} успешно добавлен!")
-        except Exception as e:
-            logger.error(f"Failed to add channel: {e}")
-            await message.answer(f"❌ Ошибка при добавлении канала: {e}")
+            # Check if channel already exists
+            existing_channel = await session.scalar(
+                f"SELECT id FROM channels WHERE channel_id = {channel_id}"
+            )
+            
+            if existing_channel:
+                await message.answer(f"❌ Канал с ID {channel_id} уже существует.")
+                await engine.dispose()
+                return
+            
+            # Add channel to database
+            try:
+                # Create new channel
+                await session.execute(
+                    "INSERT INTO channels (channel_id, name, is_active) VALUES (:channel_id, :name, 1)",
+                    {"channel_id": channel_id, "name": name}
+                )
+                await session.commit()
+                
+                await message.answer(f"✅ Канал {name} успешно добавлен!")
+            except Exception as e:
+                logger.error(f"Failed to add channel: {e}")
+                await message.answer(f"❌ Ошибка при добавлении канала: {e}")
+            
+            await engine.dispose()
+    
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in cmd_add_channel: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 # Toggle channel command handler
 async def cmd_toggle_channel(message: types.Message):
