@@ -60,8 +60,17 @@ async def init_db():
     
     logger.info("Connecting to database and creating tables (if needed)...")
     async with engine.begin() as conn:
-        logger.info("Connection established. Running create_all...")
-        # Create tables if they don't exist
+        logger.info("Connection established.")
+        
+        # Check if we need to reset the database (drop and recreate tables)
+        db_reset = os.getenv("DB_RESET", "").lower() in ("true", "1", "yes")
+        if db_reset:
+            logger.warning("DB_RESET is enabled! Dropping all tables...")
+            await conn.run_sync(Base.metadata.drop_all)
+            logger.warning("All tables dropped. Will recreate with new schema.")
+        
+        # Create tables
+        logger.info("Running create_all...")
         await conn.run_sync(Base.metadata.create_all)
         logger.info("create_all finished.")
     
