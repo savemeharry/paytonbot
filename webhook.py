@@ -145,9 +145,13 @@ def webhook():
     
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
-        update = types.Update.to_object(json_string)
         
         try:
+            import json
+            # Правильно парсим JSON перед созданием объекта Update
+            json_data = json.loads(json_string)
+            update = types.Update(**json_data)
+            
             # Обработка обновления в новом потоке
             future = asyncio.run_coroutine_threadsafe(
                 dp.process_update(update),
@@ -156,6 +160,9 @@ def webhook():
             # Wait for processing to complete with a timeout
             future.result(timeout=60)
             return Response(status=200)
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка декодирования JSON: {e}", exc_info=True)
+            return Response(status=400)
         except Exception as e:
             # Log the error but still return 200 to Telegram
             logger.error(f"Error processing update: {e}", exc_info=True)
