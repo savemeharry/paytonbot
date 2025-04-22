@@ -219,8 +219,19 @@ async def cmd_make_admin(message: types.Message):
     try:
         # Parse command arguments
         try:
-            _, password = message.text.split()
-        except ValueError:
+            parts = message.text.split()
+            if len(parts) < 2:
+                logger.info(f"[DEBUG] makeadmin: Недостаточно аргументов: {message.text}")
+                await message.answer(
+                    "❌ Ошибка в формате команды.\n"
+                    "Формат: /makeadmin ПАРОЛЬ"
+                )
+                return
+            
+            password = parts[1]
+            logger.info(f"[DEBUG] makeadmin: Получен пароль: {password}")
+        except ValueError as e:
+            logger.info(f"[DEBUG] makeadmin: Ошибка парсинга: {e}")
             await message.answer(
                 "❌ Ошибка в формате команды.\n"
                 "Формат: /makeadmin ПАРОЛЬ"
@@ -230,6 +241,7 @@ async def cmd_make_admin(message: types.Message):
         # Check password
         admin_password = "301402503"
         if password != admin_password:
+            logger.info(f"[DEBUG] makeadmin: Неверный пароль: {password}")
             await message.answer("❌ Неверный пароль.")
             return
             
@@ -254,22 +266,29 @@ async def cmd_make_admin(message: types.Message):
         async with get_session(session_factory) as session:
             # Get user
             from app.models import User
-            query = text(f"SELECT id FROM users WHERE user_id = :user_id")
+            query = text("SELECT id FROM users WHERE user_id = :user_id")
+            logger.info(f"[DEBUG] makeadmin: Выполняем запрос с user_id={user_id}")
             user_query = await session.execute(query, {"user_id": user_id})
             user_id_db = user_query.scalar()
+            logger.info(f"[DEBUG] makeadmin: Получен id из базы: {user_id_db}")
             
             if not user_id_db:
+                logger.info(f"[DEBUG] makeadmin: Пользователь не найден в БД")
                 await message.answer("❌ Пользователь не найден в базе данных. Сначала используйте команду /start")
                 await engine.dispose()
                 return
             
             # Update user to admin
-            update_query = text(f"UPDATE users SET is_admin = true WHERE id = :user_id_db")
+            update_query = text("UPDATE users SET is_admin = true WHERE id = :user_id_db")
+            logger.info(f"[DEBUG] makeadmin: Обновляем пользователя id={user_id_db}")
             await session.execute(update_query, {"user_id_db": user_id_db})
             await session.commit()
+            logger.info(f"[DEBUG] makeadmin: Транзакция завершена успешно")
             
             await message.answer("✅ Вы успешно стали администратором!")
+            logger.info(f"[DEBUG] makeadmin: Сообщение отправлено пользователю")
             await engine.dispose()
+            logger.info(f"[DEBUG] makeadmin: Соединение с БД закрыто")
     
     except Exception as e:
         logger.error(f"[DEBUG] Error in cmd_make_admin: {e}", exc_info=True)
