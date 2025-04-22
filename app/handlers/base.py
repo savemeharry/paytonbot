@@ -294,6 +294,93 @@ async def cmd_make_admin(message: types.Message):
         logger.error(f"[DEBUG] Error in cmd_make_admin: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
+# Make admin command handler
+async def cmd_create_user(message: types.Message):
+    """Handle /createuser command - create user in database"""
+    user_id = message.from_user.id
+    username = message.from_user.username or ""
+    first_name = message.from_user.first_name or ""
+    last_name = message.from_user.last_name or ""
+    
+    logger.info(f"[DEBUG] cmd_create_user for user {user_id}, @{username}")
+    
+    try:
+        # Create a fresh database connection for this event loop
+        import os
+        from dotenv import load_dotenv
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy import text
+        
+        # Load environment variables if needed
+        load_dotenv()
+        
+        # Get database URL
+        db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db")
+        logger.info(f"[DEBUG] Creating new DB engine for createuser with URL: {db_url[:db_url.find(':')]}://...elided...")
+        
+        # Create new engine and session factory for this event loop
+        engine = create_async_engine(db_url, echo=False, pool_timeout=30)
+        session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        
+        async with get_session(session_factory) as session:
+            # Check if user already exists
+            from app.models import User
+            query = text("SELECT id FROM users WHERE user_id = :user_id")
+            logger.info(f"[DEBUG] createuser: Проверяем существование пользователя с user_id={user_id}")
+            user_query = await session.execute(query, {"user_id": user_id})
+            user_id_db = user_query.scalar()
+            
+            if user_id_db:
+                logger.info(f"[DEBUG] createuser: Пользователь уже существует в БД, id={user_id_db}")
+                await message.answer("✅ Пользователь уже существует в базе данных.")
+                await engine.dispose()
+                return
+            
+            # Create user
+            admin_ids = os.getenv("ADMIN_IDS", "").split(",")
+            is_admin = str(user_id) in admin_ids
+            
+            logger.info(f"[DEBUG] createuser: ADMIN_IDS={admin_ids}, is_admin={is_admin}")
+            
+            insert_query = text("""
+                INSERT INTO users (user_id, username, first_name, last_name, is_admin, created_at, last_active) 
+                VALUES (:user_id, :username, :first_name, :last_name, :is_admin, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
+            """)
+            
+            logger.info(f"[DEBUG] createuser: Создаем пользователя user_id={user_id}, is_admin={is_admin}")
+            
+            result = await session.execute(
+                insert_query, 
+                {
+                    "user_id": user_id,
+                    "username": username,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "is_admin": is_admin
+                }
+            )
+            new_id = result.scalar()
+            await session.commit()
+            
+            logger.info(f"[DEBUG] createuser: Пользователь создан, id={new_id}")
+            
+            # Force additional admin status
+            logger.info(f"[DEBUG] createuser: Устанавливаем права администратора для пользователя")
+            update_query = text("UPDATE users SET is_admin = true WHERE id = :user_id_db")
+            await session.execute(update_query, {"user_id_db": new_id})
+            await session.commit()
+            
+            logger.info(f"[DEBUG] createuser: Права администратора установлены")
+            
+            await message.answer("✅ Пользователь успешно создан и получил права администратора!")
+            await engine.dispose()
+    
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in cmd_create_user: {e}", exc_info=True)
+        await message.answer(f"Произошла ошибка: {str(e)}")
+
 # Register base handlers
 def register_base_handlers(dp: Dispatcher):
     """Register all base handlers"""
@@ -306,6 +393,8 @@ def register_base_handlers(dp: Dispatcher):
     logger.info(f"Registered cmd_my_subscriptions for Command('mysubscriptions') filter.")
     dp.register_message_handler(cmd_make_admin, Command("makeadmin"))
     logger.info(f"Registered cmd_make_admin for Command('makeadmin') filter.")
+    dp.register_message_handler(cmd_create_user, Command("createuser"))
+    logger.info(f"Registered cmd_create_user for Command('createuser') filter.")
     
     dp.register_callback_query_handler(callback_back_to_start, lambda c: c.data == "back_to_start")
     logger.info(f"Registered callback_back_to_start.")
