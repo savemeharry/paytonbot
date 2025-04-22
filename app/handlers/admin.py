@@ -914,7 +914,7 @@ async def cmd_add_tariff(message: types.Message):
                 await session.execute(
                     text("""
                     INSERT INTO tariffs (channel_id, name, description, duration_days, price_stars, is_active) 
-                    VALUES (:channel_id, :name, :description, :duration_days, :price_stars, true)
+                    VALUES (:channel_id, :name, :description, :duration_days, :price_stars, 1)
                     """),
                     {
                         "channel_id": channel_id, 
