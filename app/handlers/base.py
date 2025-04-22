@@ -238,6 +238,7 @@ async def cmd_make_admin(message: types.Message):
         from dotenv import load_dotenv
         from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
         from sqlalchemy.orm import sessionmaker
+        from sqlalchemy import text
         
         # Load environment variables if needed
         load_dotenv()
@@ -253,7 +254,8 @@ async def cmd_make_admin(message: types.Message):
         async with get_session(session_factory) as session:
             # Get user
             from app.models import User
-            user_query = await session.execute(f"SELECT id FROM users WHERE user_id = {user_id}")
+            query = text(f"SELECT id FROM users WHERE user_id = :user_id")
+            user_query = await session.execute(query, {"user_id": user_id})
             user_id_db = user_query.scalar()
             
             if not user_id_db:
@@ -262,7 +264,8 @@ async def cmd_make_admin(message: types.Message):
                 return
             
             # Update user to admin
-            await session.execute(f"UPDATE users SET is_admin = true WHERE id = {user_id_db}")
+            update_query = text(f"UPDATE users SET is_admin = true WHERE id = :user_id_db")
+            await session.execute(update_query, {"user_id_db": user_id_db})
             await session.commit()
             
             await message.answer("✅ Вы успешно стали администратором!")
