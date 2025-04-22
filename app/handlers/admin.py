@@ -892,7 +892,7 @@ async def cmd_add_tariff(message: types.Message):
                 
                 # Check if channel exists
                 channel = await session.scalar(
-                    text("SELECT id FROM channels WHERE id = :channel_id").bindparams(channel_id=channel_id)
+                    text("SELECT id FROM channels WHERE channel_id = :channel_id").bindparams(channel_id=channel_id)
                 )
                 
                 if channel is None:
@@ -991,7 +991,7 @@ async def cmd_add_sub(message: types.Message):
                     
                 # Check if channel exists
                 channel = await session.scalar(
-                    text("SELECT id FROM channels WHERE id = :channel_id").bindparams(channel_id=channel_id)
+                    text("SELECT id FROM channels WHERE channel_id = :channel_id").bindparams(channel_id=channel_id)
                 )
                 
                 if channel is None:
