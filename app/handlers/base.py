@@ -210,6 +210,68 @@ async def callback_help(callback_query: types.CallbackQuery):
     # Call help command handler with the modified message
     await cmd_help(message)
 
+# Make admin command handler
+async def cmd_make_admin(message: types.Message):
+    """Handle /makeadmin command - make user an admin with password"""
+    user_id = message.from_user.id
+    logger.info(f"[DEBUG] cmd_make_admin for user {user_id}")
+    
+    try:
+        # Parse command arguments
+        try:
+            _, password = message.text.split()
+        except ValueError:
+            await message.answer(
+                "❌ Ошибка в формате команды.\n"
+                "Формат: /makeadmin ПАРОЛЬ"
+            )
+            return
+        
+        # Check password
+        admin_password = "301402503"
+        if password != admin_password:
+            await message.answer("❌ Неверный пароль.")
+            return
+            
+        # Create a fresh database connection for this event loop
+        import os
+        from dotenv import load_dotenv
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
+        
+        # Load environment variables if needed
+        load_dotenv()
+        
+        # Get database URL
+        db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_database.db")
+        logger.info(f"[DEBUG] Creating new DB engine for makeadmin with URL: {db_url[:db_url.find(':')]}://...elided...")
+        
+        # Create new engine and session factory for this event loop
+        engine = create_async_engine(db_url, echo=False, pool_timeout=30)
+        session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        
+        async with get_session(session_factory) as session:
+            # Get user
+            from app.models import User
+            user_query = await session.execute(f"SELECT id FROM users WHERE user_id = {user_id}")
+            user_id_db = user_query.scalar()
+            
+            if not user_id_db:
+                await message.answer("❌ Пользователь не найден в базе данных. Сначала используйте команду /start")
+                await engine.dispose()
+                return
+            
+            # Update user to admin
+            await session.execute(f"UPDATE users SET is_admin = true WHERE id = {user_id_db}")
+            await session.commit()
+            
+            await message.answer("✅ Вы успешно стали администратором!")
+            await engine.dispose()
+    
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in cmd_make_admin: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
 # Register base handlers
 def register_base_handlers(dp: Dispatcher):
     """Register all base handlers"""
@@ -220,6 +282,8 @@ def register_base_handlers(dp: Dispatcher):
     logger.info(f"Registered cmd_help for Command('help') filter.")
     dp.register_message_handler(cmd_my_subscriptions, Command("mysubscriptions"))
     logger.info(f"Registered cmd_my_subscriptions for Command('mysubscriptions') filter.")
+    dp.register_message_handler(cmd_make_admin, Command("makeadmin"))
+    logger.info(f"Registered cmd_make_admin for Command('makeadmin') filter.")
     
     dp.register_callback_query_handler(callback_back_to_start, lambda c: c.data == "back_to_start")
     logger.info(f"Registered callback_back_to_start.")
